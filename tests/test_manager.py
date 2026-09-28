@@ -11,7 +11,7 @@ def test_continues_after_missing_or_invalid_input(tmp_path):
         )
         == 1
     )
-    assert len(list(output.glob("*report.json"))) == 2
+    assert len(list((output / "report").glob("*report.json"))) == 2
 
 
 def test_replaces_report_on_repeated_processing(tmp_path):
@@ -22,7 +22,8 @@ def test_replaces_report_on_repeated_processing(tmp_path):
 
     output = tmp_path / "out"
     output.mkdir()
-    existing = output / "2026-09-28-13-58-source-001-report.json"
+    (output / "report").mkdir()
+    existing = output / "report" / "2026-09-28-13-58-source-001-report.json"
     existing.write_text("preserved")
     assert (
         ParseManager().run(
@@ -31,7 +32,7 @@ def test_replaces_report_on_repeated_processing(tmp_path):
         == 1
     )
     assert json.loads(existing.read_text(encoding="utf-8"))["status"] == "error"
-    assert list(output.iterdir()) == [existing]
+    assert list((output / "report").iterdir()) == [existing]
 
 
 def test_exports_two_games_and_same_basename_without_collision(tmp_path, observations, sample_game):
@@ -129,14 +130,16 @@ def test_fallback_time_shared_by_all_outputs_and_ambiguous_source_continues(tmp_
     ).run([ambiguous, valid], output, "withoutEggs", 50, Corrections())
     assert code == 1
     assert calls == [1]
-    assert sorted(p.name for p in output.iterdir()) == [
+    assert sorted(p.relative_to(output).as_posix() for p in output.rglob("*.json")) == [
         "2026-09-28-18-04-03-007-source-002-game-001.json",
         "2026-09-28-18-04-03-007-source-002-game-002.json",
-        "2026-09-28-18-04-03-007-source-002-report.json",
-        "undated-source-001-report.json",
+        "report/2026-09-28-18-04-03-007-source-002-report.json",
+        "report/undated-source-001-report.json",
     ]
     report = json.loads(
-        (output / "2026-09-28-18-04-03-007-source-002-report.json").read_text(encoding="utf-8")
+        (output / "report" / "2026-09-28-18-04-03-007-source-002-report.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert report["recording_time"]["source"] == "current_time"
     assert report["recording_time"]["reason"]
@@ -285,3 +288,45 @@ def test_interrupt_finishes_progress_and_does_not_start_next_source(tmp_path, ca
     text = capsys.readouterr().out
     assert "прервана" in text
     assert "100%" not in text
+
+
+def test_keeps_old_root_report_and_writes_new_one_in_subdirectory(tmp_path):
+    import json
+
+    from domino_video.corrections import Corrections
+    from domino_video.manager import ParseManager
+
+    output = tmp_path / "custom output"
+    output.mkdir()
+    name = "2026-09-28-13-58-source-001-report.json"
+    old = output / name
+    old.write_text("old report")
+    assert (
+        ParseManager().run(
+            [tmp_path / "2026-09-28-13-58.mp4"], output, "withoutEggs", 50, Corrections()
+        )
+        == 1
+    )
+    assert old.read_text() == "old report"
+    assert json.loads((output / "report" / name).read_text(encoding="utf-8"))["status"] == "error"
+
+
+def test_file_in_place_of_report_directory_produces_clear_failure(tmp_path, capsys):
+    from domino_video.corrections import Corrections
+    from domino_video.manager import ParseManager
+
+    output = tmp_path / "out"
+    output.mkdir()
+    obstacle = output / "report"
+    obstacle.write_text("preserve")
+    assert (
+        ParseManager().run(
+            [tmp_path / "2026-09-28-13-58.mp4"], output, "withoutEggs", 50, Corrections()
+        )
+        == 1
+    )
+    text = capsys.readouterr().out
+    assert "Не удалось сохранить отчёт" in text
+    assert "100%" not in text
+    assert obstacle.read_text() == "preserve"
+    assert list(output.iterdir()) == [obstacle]

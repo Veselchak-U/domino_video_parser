@@ -132,7 +132,7 @@ def test_directory_exports_valid_game_after_corrupt_video(
     assert main(RULES + ["--workers", "1"]) == 1
     game = next(Path("out").glob("*-source-002-game-001.json"))
     assert json.loads(game.read_text(encoding="utf-8")) == sample_game
-    assert len(list(Path("out").glob("*-report.json"))) == 2
+    assert len(list((Path("out") / "report").glob("*-report.json"))) == 2
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows BAT")
@@ -145,7 +145,7 @@ def test_bat_preserves_working_directory_and_exit_codes(tmp_path):
     (source / "тест видео.mp4").write_bytes(b"broken video")
     result = subprocess.run([str(bat), *RULES], cwd=tmp_path, capture_output=True)
     assert result.returncode == 1, result.stderr
-    report = next((tmp_path / "out").glob("*-source-001-report.json"))
+    report = next((tmp_path / "out" / "report").glob("*-source-001-report.json"))
     assert json.loads(report.read_text(encoding="utf-8"))["source"] == str(
         source / "тест видео.mp4"
     )
@@ -192,5 +192,7 @@ def test_windows_entry_points_decode_with_spawn(tmp_path, entry):
     assert text.count("Процессов распознавания: 2") == 1
     assert text.count("[1/1]") == 1
     assert "100%" not in text
-    report = json.loads(next((tmp_path / "out").glob("*report.json")).read_text(encoding="utf-8"))
+    report = json.loads(
+        next((tmp_path / "out" / "report").glob("*report.json")).read_text(encoding="utf-8")
+    )
     assert "Не найдена партия" in report["errors"][0]["message"]

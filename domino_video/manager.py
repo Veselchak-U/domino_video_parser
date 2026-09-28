@@ -128,7 +128,9 @@ class ParseManager:
                 }
                 report_saved = False
                 try:
-                    self._storage.write(output / f"{prefix}-report.json", report, replace=True)
+                    self._storage.write(
+                        output / "report" / f"{prefix}-report.json", report, replace=True
+                    )
                     report_saved = True
                 except KeyboardInterrupt:
                     progress.message("Обработка прервана")
