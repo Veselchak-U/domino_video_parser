@@ -251,17 +251,23 @@ class GameReconstructor:
                     )
                     for action in actions:
                         new_ends = list(ends) if ends else [a, b]
+                        move_stone = oriented
                         if action != "start":
                             side = 0 if action == "left" else 1
                             if new_ends[side] not in (a, b):
                                 continue
-                            new_ends[side] = b if new_ends[side] == a else a
+                            joined = new_ends[side]
+                            outer = b if joined == a else a
+                            move_stone = (
+                                f"{outer}-{joined}" if action == "left" else f"{joined}-{outer}"
+                            )
+                            new_ends[side] = outer
                         new_played = deepcopy(played)
                         new_played[seat].append(event["stone"])
                         expanded.append(
                             (
                                 next_moves
-                                + [dict(player=names[seat], action=action, stone=oriented)],
+                                + [dict(player=names[seat], action=action, stone=move_stone)],
                                 new_ends,
                                 (seat + 1) % 4,
                                 new_played,

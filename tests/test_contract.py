@@ -196,4 +196,5 @@ def test_allows_reversed_start_orientation(example):
     for move in moves[1:]:
         if move["action"] in ("left", "right"):
             move["action"] = "right" if move["action"] == "left" else "left"
+            move["stone"] = move["stone"][::-1]
     assert GameValidator().validate(example) == example

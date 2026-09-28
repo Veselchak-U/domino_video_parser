@@ -115,9 +115,9 @@ class GameValidator:
                         ends = [a, b]
                     elif action in ("left", "right"):
                         side = 0 if action == "left" else 1
-                        if ends[side] not in (a, b):
+                        if ends[side] != (b if action == "left" else a):
                             raise InvalidGame(f"{where}: несовпадающий край")
-                        ends[side] = b if ends[side] == a else a
+                        ends[side] = a if action == "left" else b
                     else:
                         raise InvalidGame(f"{where}: неизвестное действие")
                     hands[player].remove(stone)

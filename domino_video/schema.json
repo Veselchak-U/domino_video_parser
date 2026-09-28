@@ -204,6 +204,11 @@
         "6-6"
       ]
     },
+    "orientedStone": {
+      "type": "string",
+      "pattern": "^[0-6]-[0-6]$",
+      "description": "Камень в ориентации слева направо: первая цифра смотрит влево, вторая вправо. Для left вторая цифра совпадает с левым концом цепочки; для right первая цифра совпадает с правым концом. Совпадение проверяется воспроизведением."
+    },
     "team": {
       "type": "object",
       "properties": {
@@ -297,7 +302,7 @@
               ]
             },
             "stone": {
-              "$ref": "#/$defs/stone"
+              "$ref": "#/$defs/orientedStone"
             }
           },
           "required": [
@@ -317,8 +322,7 @@
               "const": "start"
             },
             "stone": {
-              "type": "string",
-              "pattern": "^[0-6]-[0-6]$"
+              "$ref": "#/$defs/orientedStone"
             }
           },
           "required": [

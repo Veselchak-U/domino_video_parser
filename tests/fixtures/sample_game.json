@@ -82,12 +82,12 @@
         {
           "player": "Mohammed>.",
           "action": "left",
-          "stone": "1-6"
+          "stone": "6-1"
         },
         {
           "player": "Player_130584019",
           "action": "right",
-          "stone": "0-1"
+          "stone": "1-0"
         },
         {
           "player": "Player_68899011",
@@ -112,7 +112,7 @@
         {
           "player": "Player_68899011",
           "action": "right",
-          "stone": "2-5"
+          "stone": "5-2"
         },
         {
           "player": "You",
@@ -127,17 +127,17 @@
         {
           "player": "Player_130584019",
           "action": "left",
-          "stone": "0-2"
+          "stone": "2-0"
         },
         {
           "player": "Player_68899011",
           "action": "left",
-          "stone": "2-6"
+          "stone": "6-2"
         },
         {
           "player": "You",
           "action": "right",
-          "stone": "3-6"
+          "stone": "6-3"
         },
         {
           "player": "Mohammed>.",
@@ -151,7 +151,7 @@
         {
           "player": "Player_68899011",
           "action": "right",
-          "stone": "1-3"
+          "stone": "3-1"
         },
         {
           "player": "You",
@@ -161,7 +161,7 @@
         {
           "player": "Mohammed>.",
           "action": "right",
-          "stone": "0-4"
+          "stone": "4-0"
         },
         {
           "player": "Player_130584019",
@@ -188,7 +188,7 @@
         {
           "player": "Player_68899011",
           "action": "left",
-          "stone": "3-4"
+          "stone": "4-3"
         },
         {
           "player": "You",
@@ -289,7 +289,7 @@
         {
           "player": "Player_68899011",
           "action": "left",
-          "stone": "1-6"
+          "stone": "6-1"
         },
         {
           "player": "You",
@@ -298,7 +298,7 @@
         {
           "player": "Mohammed>.",
           "action": "right",
-          "stone": "2-6"
+          "stone": "6-2"
         },
         {
           "player": "Player_130584019",
@@ -318,7 +318,7 @@
         {
           "player": "Mohammed>.",
           "action": "left",
-          "stone": "0-3"
+          "stone": "3-0"
         },
         {
           "player": "Player_130584019",
@@ -338,7 +338,7 @@
         {
           "player": "Mohammed>.",
           "action": "left",
-          "stone": "0-1"
+          "stone": "1-0"
         },
         {
           "player": "Player_130584019",
@@ -347,12 +347,12 @@
         {
           "player": "Player_68899011",
           "action": "left",
-          "stone": "1-3"
+          "stone": "3-1"
         },
         {
           "player": "You",
           "action": "left",
-          "stone": "3-5"
+          "stone": "5-3"
         },
         {
           "player": "Mohammed>.",
@@ -372,7 +372,7 @@
         {
           "player": "You",
           "action": "left",
-          "stone": "1-5"
+          "stone": "5-1"
         },
         {
           "player": "Mohammed>.",
@@ -386,7 +386,7 @@
         {
           "player": "Player_68899011",
           "action": "right",
-          "stone": "3-6"
+          "stone": "6-3"
         }
       ],
       "result": {
@@ -466,7 +466,7 @@
         {
           "player": "Player_68899011",
           "action": "left",
-          "stone": "0-3"
+          "stone": "3-0"
         },
         {
           "player": "You",
@@ -476,17 +476,17 @@
         {
           "player": "Mohammed>.",
           "action": "left",
-          "stone": "3-4"
+          "stone": "4-3"
         },
         {
           "player": "Player_130584019",
           "action": "left",
-          "stone": "4-6"
+          "stone": "6-4"
         },
         {
           "player": "Player_68899011",
           "action": "right",
-          "stone": "3-6"
+          "stone": "6-3"
         },
         {
           "player": "You",
@@ -496,7 +496,7 @@
         {
           "player": "Mohammed>.",
           "action": "left",
-          "stone": "1-3"
+          "stone": "3-1"
         },
         {
           "player": "Player_130584019",
@@ -505,7 +505,7 @@
         {
           "player": "Player_68899011",
           "action": "right",
-          "stone": "2-3"
+          "stone": "3-2"
         },
         {
           "player": "You",
@@ -523,7 +523,7 @@
         {
           "player": "Player_68899011",
           "action": "right",
-          "stone": "0-4"
+          "stone": "4-0"
         },
         {
           "player": "You",
@@ -533,7 +533,7 @@
         {
           "player": "Mohammed>.",
           "action": "right",
-          "stone": "3-5"
+          "stone": "5-3"
         }
       ],
       "result": {
