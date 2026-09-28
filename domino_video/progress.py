@@ -14,6 +14,8 @@ class ConsoleProgress:
         self._running = False
         self._started = 0.0
         self._percent = 0
+        self._processed_seconds = 0.0
+        self._speed = 0.0
         self._phase = ""
         self._last = None
         self._width = 0
@@ -30,22 +32,29 @@ class ConsoleProgress:
         with self._lock:
             self._started = self._clock()
             self._percent = 0
+            self._processed_seconds = 0.0
+            self._speed = 0.0
             self._phase = ""
             self._last = None
             self._width = 0
             self._stop.clear()
             self._stream.write(f"[{index}/{total}] {name}\n")
             if self._interactive:
-                self._draw("  Обработано 0% за 0 сек")
+                self._draw("  Обработано 0% за 0 сек скорость 0x")
             self._stream.flush()
             self._running = True
         if self._interactive:
             self._thread = threading.Thread(target=self._refresh, name="domino-progress")
             self._thread.start()
 
-    def update(self, percent, phase=""):
+    def update(self, percent, phase="", *, processed_seconds=None):
         with self._lock:
-            self._percent = max(self._percent, min(99, int(percent)))
+            if processed_seconds is not None:
+                self._processed_seconds = max(self._processed_seconds, processed_seconds)
+            percent = max(self._percent, min(99, int(percent)))
+            if percent != self._percent:
+                self._update_speed(max(0, self._clock() - self._started))
+            self._percent = percent
             self._phase = phase
 
     def message(self, text):
@@ -58,7 +67,9 @@ class ConsoleProgress:
         with self._lock:
             if not self._running:
                 return
-            elapsed = int(max(0, self._clock() - self._started))
+            elapsed = max(0, self._clock() - self._started)
+            if success:
+                self._update_speed(elapsed)
             self._running = False
             self._stop.set()
         # Joining while holding the output lock would deadlock a pending refresh.
@@ -67,9 +78,7 @@ class ConsoleProgress:
             self._thread = None
         with self._lock:
             percent = 100 if success else self._percent
-            text = f"  Обработано {percent}% за {elapsed} сек"
-            if not success:
-                text += " — ошибка"
+            text = self._status(percent, int(elapsed), "" if success else "ошибка")
             self._draw(text)
             self._end_line()
 
@@ -84,11 +93,19 @@ class ConsoleProgress:
                 if not self._running:
                     return
                 seconds = int(max(0, self._clock() - self._started))
-                text = f"  Обработано {self._percent}% за {seconds} сек"
-                if self._phase:
-                    text += f" — {self._phase}"
+                text = self._status(self._percent, seconds, self._phase)
                 if text != self._last:
                     self._draw(text)
+
+    def _update_speed(self, elapsed):
+        self._speed = self._processed_seconds / elapsed if elapsed > 0 else 0.0
+
+    def _status(self, percent, seconds, phase):
+        text = f"  Обработано {percent}% за {seconds} сек"
+        if phase:
+            text += f" — {phase}"
+        speed = f"{self._speed:.2f}".rstrip("0").rstrip(".")
+        return f"{text} скорость {speed}x"
 
     def _draw(self, text):
         if self._active:

@@ -152,7 +152,9 @@ class ParseManager:
         with closing(pipeline.observe(self._reader.frames(path))) as observations:
             for observation in observations:
                 result.append(observation)
-                progress.update((observation.time - timeline.start) / timeline.duration * 100)
+                processed = max(0, min(timeline.duration, observation.time - timeline.start))
+                progress.update(processed / timeline.duration * 100, processed_seconds=processed)
+        progress.update(99, processed_seconds=timeline.duration)
         return result
 
     def _groups(self, rounds, observations, limit):

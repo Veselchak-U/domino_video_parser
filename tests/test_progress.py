@@ -47,7 +47,7 @@ def test_timer_updates_without_new_observations_and_stops(phase):
     assert text.count(".mp4") == 1
     assert "\n  Обработано 0% за 0 сек" in text
     assert "\nСлужебное сообщение\n" in text
-    assert text.endswith("  Обработано 100% за 17 сек\n")
+    assert text.endswith("  Обработано 100% за 17 сек скорость 0x\n")
     assert set(threading.enumerate()) == baseline
 
 
@@ -98,7 +98,7 @@ def test_redirected_output_has_no_timer_or_intermediate_lines():
         assert set(threading.enumerate()) == baseline
         assert stream.getvalue() == "[1/1] video.mp4\n"
         progress.finish(False)
-    assert stream.getvalue() == "[1/1] video.mp4\n  Обработано 99% за 99 сек — ошибка\n"
+    assert stream.getvalue() == "[1/1] video.mp4\n  Обработано 99% за 99 сек — ошибка скорость 0x\n"
 
 
 @pytest.mark.parametrize("interrupt", [False, True])
@@ -148,3 +148,39 @@ def test_manager_keeps_timer_during_decode_and_report_write(
     assert code == int(interrupt)
     assert ("Обработано 100% за 4 сек" in stream.getvalue()) == (not interrupt)
     assert set(threading.enumerate()) == baseline
+
+
+def test_speed_updates_only_with_percent_and_resets():
+    stream = Terminal()
+    now = [0.0]
+    with ConsoleProgress(stream, clock=lambda: now[0]) as progress:
+        progress.start(1, 2, "first.mp4")
+        now[0] = 5
+        progress.update(10, processed_seconds=100)
+        stream.wait_for("Обработано 10% за 5 сек скорость 20x")
+        now[0] = 6
+        progress.update(10.9, processed_seconds=109)
+        stream.wait_for("Обработано 10% за 6 сек скорость 20x")
+        now[0] = 10
+        progress.update(11, processed_seconds=110)
+        stream.wait_for("Обработано 11% за 10 сек скорость 11x")
+        progress.update(99, processed_seconds=200)
+        now[0] = 20
+        progress.finish(True)
+        assert "Обработано 100% за 20 сек скорость 10x" in stream.getvalue()
+        progress.start(2, 2, "second.mp4")
+        progress.update(10, processed_seconds=100)
+        progress.finish(True)
+    assert stream.getvalue().rstrip().endswith("Обработано 100% за 0 сек скорость 0x")
+
+
+@pytest.mark.parametrize("seconds,expected", [(3, "3.33x"), (4, "2.5x"), (5, "2x")])
+def test_speed_format(seconds, expected):
+    stream = io.StringIO()
+    now = [0.0]
+    with ConsoleProgress(stream, clock=lambda: now[0]) as progress:
+        progress.start(1, 1, "video.mp4")
+        now[0] = seconds
+        progress.update(99, processed_seconds=10)
+        progress.finish(True)
+    assert stream.getvalue().rstrip().endswith("скорость " + expected)

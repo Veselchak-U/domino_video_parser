@@ -3,8 +3,7 @@ import multiprocessing
 import os
 import signal
 import sys
-from collections import deque
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from contextlib import closing
 
 import cv2
@@ -62,7 +61,10 @@ class ObservationPipeline:
                 for image, timestamp, read_text in self._jobs(frames):
                     yield recognizer.observe(image, timestamp, read_text)
                 return
-            pending = deque()
+            pending = {}
+            ready = {}
+            submitted = emitted = 0
+            exhausted = False
             executor = ProcessPoolExecutor(
                 max_workers=self.workers,
                 mp_context=multiprocessing.get_context("spawn"),
@@ -70,16 +72,28 @@ class ObservationPipeline:
             )
             try:
                 jobs = iter(self._jobs(frames))
-                for _ in range(2 * self.workers):
-                    job = next(jobs, None)
-                    if job is None:
+                while pending or not exhausted:
+                    while (
+                        not exhausted
+                        and len(pending) < 2 * self.workers
+                        and submitted - emitted < 32 * self.workers
+                    ):
+                        job = next(jobs, None)
+                        if job is None:
+                            exhausted = True
+                            break
+                        pending[executor.submit(_observe_frame, *job)] = submitted
+                        submitted += 1
+                    if not pending:
                         break
-                    pending.append(executor.submit(_observe_frame, *job))
-                while pending:
-                    yield pending.popleft().result()
-                    job = next(jobs, None)
-                    if job is not None:
-                        pending.append(executor.submit(_observe_frame, *job))
+                    completed, _ = wait(pending, return_when=FIRST_COMPLETED)
+                    for future in completed:
+                        ready[pending.pop(future)] = future.result()
+                    # Buffer only observations, never decoded images. The window
+                    # bounds memory even if an early frame takes much longer.
+                    while emitted in ready:
+                        yield ready.pop(emitted)
+                        emitted += 1
             finally:
                 for future in pending:
                     future.cancel()

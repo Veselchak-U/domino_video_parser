@@ -57,18 +57,21 @@ def test_parallel_bounds_queue_preserves_order_and_closes(monkeypatch, failure):
     completed = []
     closed = []
 
-    class Future:
+    from concurrent.futures import Future as RealFuture
+
+    class Future(RealFuture):
         def __init__(self, args):
+            super().__init__()
             self.args = args
+            if failure:
+                self.set_exception(failure("stop"))
+            else:
+                self.set_result(args[1])
 
         def result(self):
-            if failure:
-                raise failure("stop")
+            result = super().result()
             completed.append(self.args[1])
-            return self.args[1]
-
-        def cancel(self):
-            pass
+            return result
 
     class Pool:
         def __init__(self, **kwargs):
@@ -157,3 +160,65 @@ def test_real_crashed_worker_releases_pool_and_next_source_succeeds(monkeypatch)
     frames = ((0, np.zeros((720, 1608, 3), dtype=np.uint8)) for _ in range(1))
     assert len(list(ObservationPipeline(2).observe(frames))) == 1
     assert {p.pid for p in multiprocessing.active_children()} == baseline
+
+
+@pytest.mark.parametrize("failure", [None, ValueError])
+def test_refills_behind_slow_head_without_exceeding_window(monkeypatch, failure):
+    from concurrent.futures import Future
+    from concurrent.futures import wait as real_wait
+
+    import domino_video.pipeline as pipeline
+
+    submitted, closed = [], []
+    first = None
+    emitted = []
+
+    class GuardedFuture(Future):
+        def result(self, *args, **kwargs):
+            assert self.done(), "Waited for the slow head instead of refilling"
+            return super().result(*args, **kwargs)
+
+    class Pool:
+        def __init__(self, **kwargs):
+            pass
+
+        def submit(self, fn, image, timestamp, read_text):
+            nonlocal first
+            future = GuardedFuture()
+            submitted.append(timestamp)
+            assert len(submitted) - len(emitted) <= 64
+            if timestamp == 0:
+                first = future
+            elif failure and timestamp == 3:
+                future.set_exception(failure("worker failed"))
+            else:
+                future.set_result((timestamp, read_text))
+            return future
+
+        def shutdown(self, **kwargs):
+            closed.append(True)
+
+    def controlled_wait(pending, **kwargs):
+        assert len(pending) <= 4
+        if not any(f.done() for f in pending):
+            assert len(submitted) == 64
+            first.set_result((0, True))
+        return real_wait(pending, **kwargs)
+
+    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", Pool)
+    monkeypatch.setattr(pipeline, "wait", controlled_wait, raising=False)
+    frames = ((t, None) for t in range(200))
+
+    def collect():
+        for value in ObservationPipeline(2).observe(frames):
+            emitted.append(value)
+
+    if failure:
+        with pytest.raises(ValueError, match="worker failed"):
+            collect()
+        assert not emitted
+        assert first.cancelled()
+    else:
+        collect()
+        assert emitted == [(t, t % 5 == 0) for t in range(200)]
+    assert closed == [True]
