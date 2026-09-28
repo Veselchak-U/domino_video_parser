@@ -33,3 +33,24 @@ def test_removes_temporary_file_on_publish_failure(tmp_path, monkeypatch):
     with pytest.raises(PermissionError):
         ExportStorage().write(tmp_path / "game.json", {})
     assert not list(tmp_path.iterdir())
+
+
+def test_replaces_report_atomically_and_cleans_temp_on_failure(tmp_path, monkeypatch):
+    import os
+
+    from domino_video.storage import ExportStorage
+
+    target = tmp_path / "report.json"
+    storage = ExportStorage()
+    storage.write(target, {"status": "old"})
+    storage.write(target, {"status": "new"}, replace=True)
+    assert json.loads(target.read_text()) == {"status": "new"}
+
+    def fail(*args):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(os, "replace", fail)
+    with pytest.raises(PermissionError):
+        storage.write(target, {"status": "lost"}, replace=True)
+    assert json.loads(target.read_text()) == {"status": "new"}
+    assert list(tmp_path.iterdir()) == [target]

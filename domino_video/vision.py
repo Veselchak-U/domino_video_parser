@@ -127,7 +127,7 @@ class ScreenRecognizer:
         if self._ocr is None:
             from rapidocr_onnxruntime import RapidOCR
 
-            self._ocr = RapidOCR(intra_op_num_threads=2, inter_op_num_threads=2)
+            self._ocr = RapidOCR(intra_op_num_threads=1, inter_op_num_threads=1)
         rows, _ = self._ocr(crop)
         return " ".join(row[1] for row in (rows or []) if row[2] > 0.8)
 

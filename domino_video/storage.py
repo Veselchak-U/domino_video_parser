@@ -18,7 +18,7 @@ def read_json(text):
 
 
 class ExportStorage:
-    def write(self, target: Path, document):
+    def write(self, target: Path, document, *, replace=False):
         target.parent.mkdir(parents=True, exist_ok=True)
         data = json.dumps(document, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
         fd, path = tempfile.mkstemp(prefix=".domino-", suffix=".tmp", dir=target.parent)
@@ -27,7 +27,10 @@ class ExportStorage:
                 stream.write(data)
                 stream.flush()
                 os.fsync(stream.fileno())
-            # A hard link publishes atomically and fails if the destination exists.
-            os.link(path, target)
+            if replace:
+                os.replace(path, target)
+            else:
+                # Game exports must not overwrite an existing result.
+                os.link(path, target)
         finally:
             Path(path).unlink(missing_ok=True)

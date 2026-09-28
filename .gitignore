@@ -9,3 +9,4 @@ build/
 dist/
 in/
 out/
+openspec/changes/archive/.openspec-archive.lock

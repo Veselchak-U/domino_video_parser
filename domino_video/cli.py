@@ -44,6 +44,15 @@ def main(argv=None):
         "--score-limit", required=True, type=int, choices=[50, 101], help="лимит партии"
     )
     parser.add_argument("--corrections", type=Path, help="JSON исправлений из отчёта")
+    from .pipeline import WorkerSettings
+
+    settings = WorkerSettings()
+    parser.add_argument(
+        "--workers",
+        type=settings.parse,
+        default=settings.default(),
+        help="число процессов распознавания (по умолчанию: доступные логические CPU; Windows: максимум 61)",
+    )
     args = parser.parse_args(argv)
     try:
         videos = sorted(
@@ -75,4 +84,6 @@ def main(argv=None):
         )
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.error(f"Не удалось прочитать исправления: {error}")
-    return ParseManager().run(videos, args.output, args.fish_variant, args.score_limit, corrections)
+    return ParseManager().run(
+        videos, args.output, args.fish_variant, args.score_limit, corrections, args.workers
+    )

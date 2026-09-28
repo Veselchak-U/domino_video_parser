@@ -1,8 +1,10 @@
 import hashlib
-import time
 from collections import Counter
+from contextlib import closing
 from dataclasses import asdict
 
+from .pipeline import ObservationPipeline
+from .progress import ConsoleProgress
 from .reconstruct import GameReconstructor, ReconstructionError
 from .recording_time import RecordingTimeResolver
 from .storage import ExportStorage
@@ -19,7 +21,9 @@ class ParseManager:
         self._storage = ExportStorage()
         self._time_resolver = time_resolver or RecordingTimeResolver()
 
-    def run(self, paths, output, variant, limit, corrections):
+    def run(self, paths, output, variant, limit, corrections, workers=1):
+        progress = ConsoleProgress()
+        progress.message(f"Процессов распознавания: {workers}")
         failures = False
         hashes = {}
         hash_errors = {}
@@ -43,93 +47,110 @@ class ParseManager:
                 games=[],
                 errors=[],
             )
-            try:
-                recording_time = self._time_resolver.resolve(path)
-                prefix = f"{recording_time.prefix}-source-{index:03d}"
-                report["recording_time"] = asdict(recording_time)
-                if path in hash_errors:
-                    raise ValueError(hash_errors[path])
-                print(f"[{index}/{len(paths)}] Чтение {path.name}", flush=True)
-                observations = self._observe(path)
-                rounds = self._reconstructor.extract(observations)
-                if not rounds:
-                    raise ReconstructionError(
-                        "Не найдена партия поддерживаемого визуального профиля"
+            saved_paths = []
+            with progress:
+                progress.start(index, len(paths), path.name)
+                try:
+                    recording_time = self._time_resolver.resolve(path)
+                    prefix = f"{recording_time.prefix}-source-{index:03d}"
+                    report["recording_time"] = asdict(recording_time)
+                    if path in hash_errors:
+                        raise ValueError(hash_errors[path])
+                    observations = self._observe(path, workers, progress)
+                    progress.update(99, "проверка и сохранение")
+                    rounds = self._reconstructor.extract(observations)
+                    if not rounds:
+                        raise ReconstructionError(
+                            "Не найдена партия поддерживаемого визуального профиля"
+                        )
+                    groups = self._groups(rounds, observations, limit)
+                    corrections.check_games(hashes[path], len(groups))
+                    for game_number, group in enumerate(groups, 1):
+                        record = dict(number=game_number, rounds=group, errors=[])
+                        report["games"].append(record)
+                        try:
+                            changed, teams = corrections.apply(hashes[path], game_number, group)
+                            names = self._names(observations, group)
+                            if teams:
+                                names = [
+                                    p["name"]
+                                    for p in sorted(
+                                        [p for t in teams for p in t["players"]],
+                                        key=lambda p: p["seat"],
+                                    )
+                                ]
+                            game = self._reconstructor.build(changed, names, variant, limit)
+                            if teams:
+                                # Renaming teams must also rename all score/result references.
+                                game = self._rename_teams(game, teams)
+                            self._check_scores(game, group, observations, limit)
+                            GameValidator().validate(game)
+                            target = output / f"{prefix}-game-{game_number:03d}.json"
+                            self._storage.write(target, game)
+                            record["output"] = str(target.resolve())
+                            saved_paths.append(target)
+                        except (ValueError, OSError, KeyError, TypeError, IndexError) as error:
+                            failures = True
+                            record["errors"].append(
+                                dict(time=group[0]["start"], message=str(error))
+                            )
+                            progress.message(f"Партия {game_number}: {error}")
+                    report["status"] = (
+                        "needs_review" if any(g["errors"] for g in report["games"]) else "ok"
                     )
-                groups = self._groups(rounds, observations, limit)
-                corrections.check_games(hashes[path], len(groups))
-                for game_number, group in enumerate(groups, 1):
-                    record = dict(number=game_number, rounds=group, errors=[])
-                    report["games"].append(record)
-                    try:
-                        changed, teams = corrections.apply(hashes[path], game_number, group)
-                        names = self._names(observations, group)
-                        if teams:
-                            names = [
-                                p["name"]
-                                for p in sorted(
-                                    [p for t in teams for p in t["players"]],
-                                    key=lambda p: p["seat"],
-                                )
-                            ]
-                        game = self._reconstructor.build(changed, names, variant, limit)
-                        if teams:
-                            # Renaming teams must also rename all score/result references.
-                            game = self._rename_teams(game, teams)
-                        self._check_scores(game, group, observations, limit)
-                        GameValidator().validate(game)
-                        target = output / f"{prefix}-game-{game_number:03d}.json"
-                        self._storage.write(target, game)
-                        record["output"] = str(target.resolve())
-                        print(f"Сохранено: {target}", flush=True)
-                    except (ValueError, OSError, KeyError, TypeError, IndexError) as error:
-                        failures = True
-                        record["errors"].append(dict(time=group[0]["start"], message=str(error)))
-                        print(f"Партия {game_number}: {error}", flush=True)
-                report["status"] = (
-                    "needs_review" if any(g["errors"] for g in report["games"]) else "ok"
-                )
-            except Exception as error:
-                # A failed decoder/OCR must not abort the remaining input files.
-                failures = True
-                report["errors"].append(dict(time=None, message=f"{type(error).__name__}: {error}"))
-                print(f"Ошибка {path.name}: {error}", flush=True)
-            report["corrections_template"] = {
-                "sources": [
-                    {
-                        "sha256": hashes.get(path),
-                        "games": [
-                            {
-                                "number": g["number"],
-                                "rounds": [
-                                    {"number": n, "events": []}
-                                    for n in range(1, len(g["rounds"]) + 1)
-                                ],
-                            }
-                            for g in report["games"]
-                        ],
-                    }
-                ]
-            }
-            try:
-                self._storage.write(output / f"{prefix}-report.json", report)
-            except OSError as error:
-                failures = True
-                print(f"Не удалось сохранить отчёт: {error}", flush=True)
+                except KeyboardInterrupt:
+                    progress.message("Обработка прервана")
+                    progress.finish(False)
+                    return 1
+                except Exception as error:
+                    # A failed decoder/OCR must not abort the remaining input files.
+                    failures = True
+                    report["errors"].append(
+                        dict(time=None, message=f"{type(error).__name__}: {error}")
+                    )
+                    progress.message(f"Ошибка {path.name}: {error}")
+                report["corrections_template"] = {
+                    "sources": [
+                        {
+                            "sha256": hashes.get(path),
+                            "games": [
+                                {
+                                    "number": g["number"],
+                                    "rounds": [
+                                        {"number": n, "events": []}
+                                        for n in range(1, len(g["rounds"]) + 1)
+                                    ],
+                                }
+                                for g in report["games"]
+                            ],
+                        }
+                    ]
+                }
+                report_saved = False
+                try:
+                    self._storage.write(output / f"{prefix}-report.json", report, replace=True)
+                    report_saved = True
+                except KeyboardInterrupt:
+                    progress.message("Обработка прервана")
+                    return 1
+                except OSError as error:
+                    failures = True
+                    progress.message(f"Не удалось сохранить отчёт: {error}")
+                progress.finish(report_saved and report["status"] == "ok")
+                for target in saved_paths:
+                    progress.message(f"Сохранено: {target}")
         return int(failures)
 
-    def _observe(self, path):
+    def _observe(self, path, workers, progress):
+        timeline = self._reader.timeline(
+            path, lambda: progress.update(0, "определение длительности")
+        )
+        pipeline = ObservationPipeline(workers, recognizer=self._recognizer)
         result = []
-        last_text = -5
-        last_update = time.monotonic()
-        for timestamp, image in self._reader.frames(path):
-            read_text = timestamp - last_text >= 5
-            result.append(self._recognizer.observe(image, timestamp, read_text))
-            if read_text:
-                last_text = timestamp
-            if time.monotonic() - last_update >= 20:
-                print(f"  Обработано {timestamp:.0f} с видео", flush=True)
-                last_update = time.monotonic()
+        with closing(pipeline.observe(self._reader.frames(path))) as observations:
+            for observation in observations:
+                result.append(observation)
+                progress.update((observation.time - timeline.start) / timeline.duration * 100)
         return result
 
     def _groups(self, rounds, observations, limit):

@@ -14,7 +14,9 @@ def test_continues_after_missing_or_invalid_input(tmp_path):
     assert len(list(output.glob("*report.json"))) == 2
 
 
-def test_does_not_replace_report(tmp_path):
+def test_replaces_report_on_repeated_processing(tmp_path):
+    import json
+
     from domino_video.corrections import Corrections
     from domino_video.manager import ParseManager
 
@@ -28,7 +30,7 @@ def test_does_not_replace_report(tmp_path):
         )
         == 1
     )
-    assert existing.read_text() == "preserved"
+    assert json.loads(existing.read_text(encoding="utf-8"))["status"] == "error"
     assert list(output.iterdir()) == [existing]
 
 
@@ -45,6 +47,11 @@ def test_exports_two_games_and_same_basename_without_collision(tmp_path, observa
     combined = observations + second
 
     class Reader:
+        def timeline(self, path, scanning=None):
+            from domino_video.video import VideoTimeline
+
+            return VideoTimeline(0, 600)
+
         def frames(self, path):
             for o in combined if path.parent.name == "first" else observations:
                 yield o.time, o
@@ -89,6 +96,11 @@ def test_fallback_time_shared_by_all_outputs_and_ambiguous_source_continues(tmp_
         o.time += 300
 
     class Reader:
+        def timeline(self, path, scanning=None):
+            from domino_video.video import VideoTimeline
+
+            return VideoTimeline(0, 600)
+
         def frames(self, path):
             for o in observations + later:
                 yield o.time, o
@@ -140,6 +152,11 @@ def test_rejects_conflicting_score(tmp_path, observations):
             o.scores = (97, 29)
 
     class Reader:
+        def timeline(self, path, scanning=None):
+            from domino_video.video import VideoTimeline
+
+            return VideoTimeline(0, 600)
+
         def frames(self, path):
             for o in observations:
                 yield o.time, o
@@ -172,6 +189,11 @@ def test_name_correction_restores_export_and_bad_input_does_not_stop_it(
         o.names = None
 
     class Reader:
+        def timeline(self, path, scanning=None):
+            from domino_video.video import VideoTimeline
+
+            return VideoTimeline(0, 600)
+
         def frames(self, path):
             for o in observations:
                 yield o.time, o
@@ -199,3 +221,67 @@ def test_name_correction_restores_export_and_bad_input_does_not_stop_it(
     assert code == 1
     game = next(output.glob("*game*.json"))
     assert json.loads(game.read_text(encoding="utf-8")) == sample_game
+
+
+def test_report_write_failure_does_not_show_success(tmp_path, observations, monkeypatch, capsys):
+    from domino_video.corrections import Corrections
+    from domino_video.manager import ParseManager
+    from domino_video.video import VideoTimeline
+
+    class Reader:
+        def timeline(self, path, scanning=None):
+            return VideoTimeline(0, 291)
+
+        def frames(self, path):
+            for item in observations:
+                yield item.time, item
+
+    class Recognizer:
+        def observe(self, image, timestamp, read_text):
+            return image
+
+    manager = ParseManager(Reader(), Recognizer())
+    original = manager._storage.write
+
+    def write(path, value, **kwargs):
+        if path.name.endswith("-report.json"):
+            raise OSError("report denied")
+        original(path, value, **kwargs)
+
+    monkeypatch.setattr(manager._storage, "write", write)
+    source = tmp_path / "2026-09-28-13-58.mp4"
+    source.write_bytes(b"fixture")
+    assert manager.run([source], tmp_path / "out", "withoutEggs", 50, Corrections()) == 1
+    text = capsys.readouterr().out
+    assert "100%" not in text
+    assert "report denied" in text
+
+
+def test_interrupt_finishes_progress_and_does_not_start_next_source(tmp_path, capsys):
+    from domino_video.corrections import Corrections
+    from domino_video.manager import ParseManager
+    from domino_video.video import VideoTimeline
+
+    calls = []
+
+    class Reader:
+        def timeline(self, path, scanning=None):
+            calls.append(path)
+            return VideoTimeline(0, 10)
+
+        def frames(self, path):
+            raise KeyboardInterrupt
+            yield
+
+    source = tmp_path / "2026-09-28-13-58.mp4"
+    source.write_bytes(b"fixture")
+    assert (
+        ParseManager(reader=Reader()).run(
+            [source, source], tmp_path / "out", "withoutEggs", 50, Corrections()
+        )
+        == 1
+    )
+    assert calls == [source]
+    text = capsys.readouterr().out
+    assert "прервана" in text
+    assert "100%" not in text
