@@ -71,7 +71,8 @@ def test_final_time_is_immediate_truncated_and_reset_for_next_file(terminal):
 
 
 @pytest.mark.parametrize("failure", [ValueError, KeyboardInterrupt])
-def test_context_stops_timer_on_error_or_interrupt(failure):
+def test_context_stops_timer_on_error_or_interrupt(failure, monkeypatch):
+    monkeypatch.setattr(ConsoleProgress, "_enable_color", lambda self: False)
     stream = Terminal()
     now = [0.0]
     baseline = set(threading.enumerate())
@@ -82,7 +83,7 @@ def test_context_stops_timer_on_error_or_interrupt(failure):
             now[0] = 9.8
             raise failure("stop")
     assert "100%" not in stream.getvalue()
-    assert "  Обработано 99% за 9 сек — ошибка" in stream.getvalue()
+    assert "  Обработано 99% за 9 сек скорость 0x — ошибка" in stream.getvalue()
     assert set(threading.enumerate()) == baseline
 
 
@@ -98,7 +99,46 @@ def test_redirected_output_has_no_timer_or_intermediate_lines():
         assert set(threading.enumerate()) == baseline
         assert stream.getvalue() == "[1/1] video.mp4\n"
         progress.finish(False)
-    assert stream.getvalue() == "[1/1] video.mp4\n  Обработано 99% за 99 сек — ошибка скорость 0x\n"
+    assert stream.getvalue() == "[1/1] video.mp4\n  Обработано 99% за 99 сек скорость 0x — ошибка\n"
+
+
+@pytest.mark.parametrize("terminal,color", [(True, True), (True, False), (False, True)])
+@pytest.mark.parametrize("failure", [ValueError, KeyboardInterrupt])
+def test_error_suffix_color_order_and_frozen_speed(monkeypatch, terminal, color, failure):
+    monkeypatch.setattr(ConsoleProgress, "_enable_color", lambda self: color, raising=False)
+    stream = Terminal() if terminal else io.StringIO()
+    now = [0.0]
+    with pytest.raises(failure):
+        with ConsoleProgress(stream, clock=lambda: now[0]) as progress:
+            progress.start(1, 2, "first.mp4")
+            now[0] = 5
+            progress.update(99, processed_seconds=100)
+            now[0] = 10
+            raise failure()
+    suffix = "\x1b[31m — ошибка\x1b[39m" if terminal and color else " — ошибка"
+    assert stream.getvalue().endswith(f"  Обработано 99% за 10 сек скорость 20x{suffix}\n")
+    if not terminal or not color:
+        assert "\x1b" not in stream.getvalue()
+    assert "100%" not in stream.getvalue()
+    progress.message("Обычный текст")
+    assert stream.getvalue().endswith(suffix + "\nОбычный текст\n")
+
+
+def test_colored_error_clears_longer_previous_phase(monkeypatch):
+    monkeypatch.setattr(ConsoleProgress, "_enable_color", lambda self: True)
+    stream = Terminal()
+    now = [0.0]
+    phase = "проверка и сохранение"
+    with ConsoleProgress(stream, clock=lambda: now[0]) as progress:
+        progress.start(1, 1, "video.mp4")
+        now[0] = 5
+        progress.update(99, phase, processed_seconds=100)
+        before = f"  Обработано 99% за 5 сек — {phase} скорость 20x"
+        stream.wait_for(before)
+        progress.finish(False)
+    plain = "  Обработано 99% за 5 сек скорость 20x — ошибка"
+    padding = " " * (len(before) - len(plain))
+    assert stream.getvalue().endswith("\x1b[31m — ошибка\x1b[39m" + padding + "\n")
 
 
 @pytest.mark.parametrize("interrupt", [False, True])

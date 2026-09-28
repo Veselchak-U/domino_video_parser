@@ -1,3 +1,69 @@
+import pytest
+
+
+@pytest.mark.parametrize("failure", [None, "publish", "validation"])
+def test_repeated_game_export_preserves_or_replaces_result(
+    tmp_path, observations, sample_game, monkeypatch, capsys, failure
+):
+    import json
+    import os
+
+    from domino_video.corrections import Corrections
+    from domino_video.manager import ParseManager
+    from domino_video.video import VideoTimeline
+
+    class Reader:
+        def timeline(self, path, scanning=None):
+            return VideoTimeline(0, 291)
+
+        def frames(self, path):
+            for item in observations:
+                yield item.time, item
+
+    class Recognizer:
+        def observe(self, image, timestamp, read_text):
+            return image
+
+    source = tmp_path / "2026-09-28-13-58.mp4"
+    source.write_bytes(b"fixture")
+    output = tmp_path / "out"
+    manager = ParseManager(Reader(), Recognizer())
+    assert manager.run([source], output, "withoutEggs", 50, Corrections()) == 0
+    target = next(output.glob("*game*.json"))
+    target.write_text('{"previous": true}', encoding="utf-8")
+    previous = target.read_bytes()
+    extra = output / "2026-09-28-13-58-source-001-game-002.json"
+    extra.write_bytes(b"previous extra game")
+    capsys.readouterr()
+    if failure == "publish":
+        original = os.replace
+
+        def replace(src, dst):
+            if dst == target:
+                raise PermissionError("game denied")
+            return original(src, dst)
+
+        monkeypatch.setattr(os, "replace", replace)
+    elif failure == "validation":
+        for item in observations:
+            if item.scores and item.time > 284:
+                item.scores = (97, 29)
+    assert manager.run([source], output, "withoutEggs", 50, Corrections()) == int(bool(failure))
+    report = json.loads(next((output / "report").glob("*.json")).read_text(encoding="utf-8"))
+    assert len(report["games"]) == 1
+    assert report["status"] == ("needs_review" if failure else "ok")
+    if failure:
+        assert target.read_bytes() == previous
+        assert report["games"][0]["errors"]
+        if failure == "publish":
+            assert "game denied" in report["games"][0]["errors"][0]["message"]
+    else:
+        assert json.loads(target.read_text(encoding="utf-8")) == sample_game
+    assert extra.read_bytes() == b"previous extra game"
+    assert not list(output.rglob(".domino-*.tmp"))
+    assert ("100%" in capsys.readouterr().out) == (not failure)
+
+
 def test_continues_after_missing_or_invalid_input(tmp_path):
     from domino_video.corrections import Corrections
     from domino_video.manager import ParseManager

@@ -86,7 +86,7 @@ class ParseManager:
                             self._check_scores(game, group, observations, limit)
                             GameValidator().validate(game)
                             target = output / f"{prefix}-game-{game_number:03d}.json"
-                            self._storage.write(target, game)
+                            self._storage.write(target, game, replace=True)
                             record["output"] = str(target.resolve())
                             saved_paths.append(target)
                         except (ValueError, OSError, KeyError, TypeError, IndexError) as error:

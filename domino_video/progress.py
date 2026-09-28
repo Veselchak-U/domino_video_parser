@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 import time
@@ -7,6 +8,7 @@ class ConsoleProgress:
     def __init__(self, stream=None, clock=time.monotonic):
         self._stream = stream if stream is not None else sys.stdout
         self._interactive = self._stream.isatty()
+        self._color = self._interactive and self._enable_color()
         self._clock = clock
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -78,9 +80,27 @@ class ConsoleProgress:
             self._thread = None
         with self._lock:
             percent = 100 if success else self._percent
-            text = self._status(percent, int(elapsed), "" if success else "ошибка")
-            self._draw(text)
+            text = self._status(percent, int(elapsed), "")
+            self._draw(text, error=not success)
             self._end_line()
+
+    def _enable_color(self):
+        if os.name != "nt":
+            return os.environ.get("TERM") != "dumb"
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        try:
+            handle = wintypes.HANDLE(msvcrt.get_osfhandle(self._stream.fileno()))
+            mode = wintypes.DWORD()
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            if not kernel.GetConsoleMode(handle, ctypes.byref(mode)):
+                return False
+            # ENABLE_VIRTUAL_TERMINAL_PROCESSING, preserving other console flags.
+            return bool(kernel.SetConsoleMode(handle, wintypes.DWORD(mode.value | 0x0004)))
+        except (OSError, ValueError, AttributeError):
+            return False
 
     def _refresh(self):
         while True:
@@ -107,12 +127,16 @@ class ConsoleProgress:
         speed = f"{self._speed:.2f}".rstrip("0").rstrip(".")
         return f"{text} скорость {speed}x"
 
-    def _draw(self, text):
+    def _draw(self, text, *, error=False):
+        suffix = " — ошибка" if error else ""
+        width = len(text) + len(suffix)
+        if suffix and self._color:
+            suffix = f"\x1b[31m{suffix}\x1b[39m"
         if self._active:
             self._stream.write("\r")
-        self._stream.write(text + " " * max(0, self._width - len(text)))
+        self._stream.write(text + suffix + " " * max(0, self._width - width))
         self._stream.flush()
-        self._width = len(text)
+        self._width = width
         self._last = text
         self._active = True
 

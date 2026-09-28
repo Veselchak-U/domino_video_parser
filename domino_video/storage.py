@@ -30,7 +30,7 @@ class ExportStorage:
             if replace:
                 os.replace(path, target)
             else:
-                # Game exports must not overwrite an existing result.
+                # Callers must explicitly opt into replacing an existing file.
                 os.link(path, target)
         finally:
             Path(path).unlink(missing_ok=True)
