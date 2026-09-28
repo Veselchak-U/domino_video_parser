@@ -19,11 +19,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Cannot replace ONNX Runtime.' }
     & $gpuPython -m pip install --requirement tools/requirements-gpu.txt
     if ($LASTEXITCODE -ne 0) { throw 'Cannot install DirectML.' }
-    @'
-from domino_video.ocr import DeviceOCR
-with DeviceOCR("gpu") as context:
-    print("GPU DirectML: all OCR models verified")
-'@ | & $gpuPython -
+    & $gpuPython -m domino_video.ocr
     if ($LASTEXITCODE -ne 0) { throw 'GPU model check failed. CPU environment is unchanged.' }
     Set-Content -LiteralPath $ready -Value 'DirectML 1.24.4'
     Write-Output 'GPU environment is ready. Use run.bat; --device cpu forces CPU.'

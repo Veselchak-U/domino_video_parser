@@ -32,6 +32,7 @@ def test_timer_updates_without_new_observations_and_stops(phase):
     baseline = set(threading.enumerate())
     with ConsoleProgress(stream, clock=lambda: now[0]) as progress:
         progress.start(2, 5, "длинное_имя_" * 30 + ".mp4")
+        progress.ready()
         progress.update(10.9, phase)
         progress.update(5, phase)
         assert "Обработано 10%" not in stream.getvalue()
@@ -57,9 +58,11 @@ def test_final_time_is_immediate_truncated_and_reset_for_next_file(terminal):
     now = [10.0]
     with ConsoleProgress(stream, clock=lambda: now[0]) as progress:
         progress.start(1, 2, "first.mp4")
+        progress.ready()
         now[0] = 145.9
         progress.finish(True)
         progress.start(2, 2, "second.mp4")
+        progress.ready()
         now[0] = 146.3
         progress.finish(True)
     text = stream.getvalue()
@@ -79,6 +82,7 @@ def test_context_stops_timer_on_error_or_interrupt(failure, monkeypatch):
     with pytest.raises(failure):
         with ConsoleProgress(stream, clock=lambda: now[0]) as progress:
             progress.start(1, 1, "video.mp4")
+            progress.ready()
             progress.update(100)
             now[0] = 9.8
             raise failure("stop")
@@ -93,6 +97,7 @@ def test_redirected_output_has_no_timer_or_intermediate_lines():
     baseline = set(threading.enumerate())
     with ConsoleProgress(stream, clock=lambda: now[0]) as progress:
         progress.start(1, 1, "video.mp4")
+        progress.ready()
         for percent in range(100):
             now[0] = percent
             progress.update(percent)
@@ -111,6 +116,7 @@ def test_error_suffix_color_order_and_frozen_speed(monkeypatch, terminal, color,
     with pytest.raises(failure):
         with ConsoleProgress(stream, clock=lambda: now[0]) as progress:
             progress.start(1, 2, "first.mp4")
+            progress.ready()
             now[0] = 5
             progress.update(99, processed_seconds=100)
             now[0] = 10
@@ -131,6 +137,7 @@ def test_colored_error_clears_longer_previous_phase(monkeypatch):
     phase = "проверка и сохранение"
     with ConsoleProgress(stream, clock=lambda: now[0]) as progress:
         progress.start(1, 1, "video.mp4")
+        progress.ready()
         now[0] = 5
         progress.update(99, phase, processed_seconds=100)
         before = f"  Обработано 99% за 5 сек — {phase} скорость 20x"
@@ -195,6 +202,7 @@ def test_speed_updates_only_with_percent_and_resets():
     now = [0.0]
     with ConsoleProgress(stream, clock=lambda: now[0]) as progress:
         progress.start(1, 2, "first.mp4")
+        progress.ready()
         now[0] = 5
         progress.update(10, processed_seconds=100)
         stream.wait_for("Обработано 10% за 5 сек скорость 20x")
@@ -209,6 +217,7 @@ def test_speed_updates_only_with_percent_and_resets():
         progress.finish(True)
         assert "Обработано 100% за 20 сек скорость 10x" in stream.getvalue()
         progress.start(2, 2, "second.mp4")
+        progress.ready()
         progress.update(10, processed_seconds=100)
         progress.finish(True)
     assert stream.getvalue().rstrip().endswith("Обработано 100% за 0 сек скорость 0x")
@@ -220,6 +229,7 @@ def test_speed_format(seconds, expected):
     now = [0.0]
     with ConsoleProgress(stream, clock=lambda: now[0]) as progress:
         progress.start(1, 1, "video.mp4")
+        progress.ready()
         now[0] = seconds
         progress.update(99, processed_seconds=10)
         progress.finish(True)

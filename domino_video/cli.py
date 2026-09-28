@@ -50,6 +50,12 @@ def main(argv=None):
         default="auto",
         help="устройство OCR: auto (по умолчанию), cpu или gpu (DirectML)",
     )
+    parser.add_argument(
+        "--gpu-workers",
+        choices=["auto", "1", "2"],
+        default="auto",
+        help="число GPU-процессов: auto/2 — до двух по памяти, 1 — один",
+    )
     from .pipeline import WorkerSettings
 
     settings = WorkerSettings()
@@ -98,4 +104,5 @@ def main(argv=None):
         corrections,
         args.workers,
         args.device,
+        args.gpu_workers,
     )

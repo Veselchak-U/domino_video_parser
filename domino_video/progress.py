@@ -41,10 +41,15 @@ class ConsoleProgress:
             self._width = 0
             self._stop.clear()
             self._stream.write(f"[{index}/{total}] {name}\n")
-            if self._interactive:
-                self._draw("  Обработано 0% за 0 сек скорость 0x")
             self._stream.flush()
             self._running = True
+
+    def ready(self):
+        if not self._running or not self._interactive or self._thread is not None:
+            return
+        with self._lock:
+            self._phase = ""
+            self._draw(self._status(self._percent, int(max(0, self._clock() - self._started)), ""))
         if self._interactive:
             self._thread = threading.Thread(target=self._refresh, name="domino-progress")
             self._thread.start()

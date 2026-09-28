@@ -1,8 +1,11 @@
-"""Local OCR backend and its single-threaded GPU lifetime."""
+"""Local OCR models and adaptive isolated GPU workers."""
 
 import sys
-from concurrent.futures import ThreadPoolExecutor
+import threading
 from pathlib import Path
+
+from .gpu_memory import probe_memory
+from .gpu_worker import GPUWorker
 
 
 class DirectMLAdapter:
@@ -53,6 +56,14 @@ class DirectMLAdapter:
             self.close()
             raise
 
+    def probe(self):
+        import numpy as np
+
+        for session, shape in zip(
+            self._sessions, [(1, 3, 64, 64), (1, 3, 48, 192), (1, 3, 48, 320)]
+        ):
+            session.run(None, {session.get_inputs()[0].name: np.ones(shape, dtype=np.float32)})
+
     def text(self, crop):
         rows, _ = self._engine(crop)
         return " ".join(row[1] for row in (rows or []) if row[2] > 0.8)
@@ -65,14 +76,27 @@ class DirectMLAdapter:
 
 
 class DeviceOCR:
-    def __init__(self, mode, *, available=None, factory=None):
+    def __init__(
+        self, mode, gpu_workers="auto", *, available=None, worker_factory=None, memory_probe=None
+    ):
         self.mode = mode
+        self._setting = gpu_workers
         self._available = available or DirectMLAdapter.available
-        self._factory = factory or DirectMLAdapter
-        self._executor = None
-        self._adapter = None
+        self._factory = worker_factory or GPUWorker
+        self._memory = memory_probe or probe_memory
+        self._workers = []
+        self._loads = []
+        self._lock = threading.Lock()
         self.enabled = False
         self.description = "OCR: CPU"
+
+    def _memory_reason(self, threshold):
+        snapshot = self._memory()
+        if snapshot.free_mib is None:
+            return snapshot.reason or "свободная видеопамять неизвестна"
+        if snapshot.free_mib < threshold:
+            return f"свободно {snapshot.free_mib} MiB, для двух требуется {threshold} MiB"
+        return ""
 
     def __enter__(self):
         if self.mode == "cpu":
@@ -80,10 +104,25 @@ class DeviceOCR:
         try:
             if not self._available():
                 raise RuntimeError("DirectML недоступен в этой ОС или среде Python")
-            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="domino-gpu")
-            self._executor.submit(self._initialize).result()
+            reason = "задано --gpu-workers 1" if self._setting == "1" else self._memory_reason(2000)
+            self._workers.append(self._factory())
+            if not reason:
+                reason = self._memory_reason(1152)
+            if not reason:
+                try:
+                    self._workers.append(self._factory())
+                    reason = self._memory_reason(256)
+                except Exception as error:
+                    reason = f"второй GPU-процесс недоступен: {error}"
+                if reason:
+                    if len(self._workers) == 2:
+                        self._workers.pop().close()
+                    self._workers[0].probe()
+            self._loads = [0] * len(self._workers)
             self.enabled = True
-            self.description = "OCR: GPU (DirectML, адаптер 0)"
+            self.description = f"OCR: GPU (DirectML, адаптер 0), процессов: {len(self._workers)}"
+            if reason:
+                self.description += f" — {reason}"
         except BaseException as error:
             self.__exit__(None, None, None)
             if not isinstance(error, Exception):
@@ -93,22 +132,35 @@ class DeviceOCR:
             self.description = f"OCR: CPU — GPU недоступен: {error}"
         return self
 
-    def _initialize(self):
-        self._adapter = self._factory()
-
     def submit(self, prepared):
-        return self._executor.submit(prepared.finish, self._adapter.text)
+        with self._lock:
+            index = min(range(len(self._workers)), key=self._loads.__getitem__)
+            self._loads[index] += 1
+        try:
+            future = self._workers[index].submit(prepared)
+        except BaseException:
+            self._completed(index)
+            raise
+        future.add_done_callback(lambda _: self._completed(index))
+        return future
+
+    def _completed(self, index):
+        with self._lock:
+            self._loads[index] -= 1
 
     def __exit__(self, *args):
-        if self._executor is not None:
-            try:
-                self._executor.submit(self._close).result()
-            finally:
-                self._executor.shutdown(wait=True, cancel_futures=True)
-                self._executor = None
-        self.enabled = False
+        try:
+            for worker in self._workers:
+                worker.close()
+        finally:
+            self._workers.clear()
+            self.enabled = False
 
-    def _close(self):
-        if self._adapter is not None:
-            self._adapter.close()
-            self._adapter = None
+
+def main():
+    with DeviceOCR("gpu", "1"):
+        print("GPU DirectML: all OCR models verified")
+
+
+if __name__ == "__main__":
+    main()

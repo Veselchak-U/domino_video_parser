@@ -1,6 +1,30 @@
 import pytest
 
 
+class ThreadWorker:
+    """In-process worker double for pipeline scheduling tests, without native OCR."""
+
+    def __init__(self, factory):
+        from concurrent.futures import ThreadPoolExecutor
+
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            self.adapter = self.executor.submit(factory).result()
+        except BaseException:
+            self.executor.shutdown()
+            raise
+
+    def submit(self, prepared):
+        return self.executor.submit(prepared.finish, self.adapter.text)
+
+    def probe(self):
+        pass
+
+    def close(self):
+        self.executor.submit(self.adapter.close).result()
+        self.executor.shutdown(cancel_futures=True)
+
+
 @pytest.mark.parametrize("mode", ["auto", "cpu", "gpu"])
 @pytest.mark.parametrize("available", [False, True])
 def test_device_selection(mode, available):
@@ -15,7 +39,12 @@ def test_device_selection(mode, available):
         def close(self):
             calls.append("close")
 
-    session = DeviceOCR(mode, available=lambda: available, factory=Adapter)
+    session = DeviceOCR(
+        mode,
+        available=lambda: available,
+        worker_factory=lambda: ThreadWorker(Adapter),
+        gpu_workers="1",
+    )
     if mode == "gpu" and not available:
         with pytest.raises(RuntimeError, match="GPU"):
             with session:
@@ -33,7 +62,7 @@ def test_failed_gpu_initialization_is_not_reported_as_gpu(mode):
     def fail():
         raise RuntimeError("model failed")
 
-    session = DeviceOCR(mode, available=lambda: True, factory=fail)
+    session = DeviceOCR(mode, available=lambda: True, worker_factory=fail, gpu_workers="1")
     if mode == "gpu":
         with pytest.raises(RuntimeError, match="model failed"):
             with session:
@@ -76,7 +105,7 @@ def test_cli_passes_device(tmp_path, monkeypatch, mode):
         )
         == 0
     )
-    assert calls[0][-1] == mode
+    assert calls[0][-2] == mode
 
 
 @pytest.mark.parametrize(
@@ -168,7 +197,12 @@ def test_gpu_pipeline_order_bounds_owner_and_cleanup(monkeypatch, workers, failu
     monkeypatch.setattr("domino_video.pipeline.ProcessPoolExecutor", Pool)
     monkeypatch.setattr(
         "domino_video.pipeline.DeviceOCR",
-        lambda mode: DeviceOCR(mode, available=lambda: True, factory=Adapter),
+        lambda mode, setting: DeviceOCR(
+            mode,
+            available=lambda: True,
+            worker_factory=lambda: ThreadWorker(Adapter),
+            gpu_workers="1",
+        ),
     )
 
     def frames():
@@ -259,7 +293,12 @@ def test_gpu_failure_does_not_break_next_source(tmp_path, monkeypatch, observati
 
     monkeypatch.setattr(
         "domino_video.pipeline.DeviceOCR",
-        lambda mode: DeviceOCR(mode, available=lambda: True, factory=Adapter),
+        lambda mode, setting: DeviceOCR(
+            mode,
+            available=lambda: True,
+            worker_factory=lambda: ThreadWorker(Adapter),
+            gpu_workers="1",
+        ),
     )
     sources = [tmp_path / f"2026-09-28-13-{minute}.mp4" for minute in (58, 59)]
     for source in sources:
@@ -329,7 +368,7 @@ def test_gpu_window_waits_for_early_cpu_frame_without_losing_order(monkeypatch):
     class GPU:
         enabled = True
 
-        def __init__(self, mode):
+        def __init__(self, mode, setting):
             pass
 
         def __enter__(self):

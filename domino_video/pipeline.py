@@ -54,14 +54,15 @@ def _prepare_frame(image, timestamp, read_text):
 
 
 class ObservationPipeline:
-    def __init__(self, workers=1, recognizer=None, device="cpu", message=None):
+    def __init__(self, workers=1, recognizer=None, device="cpu", message=None, gpu_workers="auto"):
         self.workers = workers
         self._recognizer = recognizer
         self._device = device
         self._message = message
+        self._gpu_workers = gpu_workers
 
     def observe(self, frames):
-        with closing(frames), DeviceOCR(self._device) as gpu:
+        with closing(frames), DeviceOCR(self._device, self._gpu_workers) as gpu:
             if self._message:
                 self._message(gpu.description)
             yield from self._observe(frames, gpu)
