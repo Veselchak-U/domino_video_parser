@@ -1,0 +1,201 @@
+def test_continues_after_missing_or_invalid_input(tmp_path):
+    from domino_video.corrections import Corrections
+    from domino_video.manager import ParseManager
+
+    broken = tmp_path / "broken.mp4"
+    broken.write_bytes(b"not a video")
+    output = tmp_path / "out"
+    assert (
+        ParseManager().run(
+            [tmp_path / "missing.mp4", broken], output, "withoutEggs", 50, Corrections()
+        )
+        == 1
+    )
+    assert len(list(output.glob("*report.json"))) == 2
+
+
+def test_does_not_replace_report(tmp_path):
+    from domino_video.corrections import Corrections
+    from domino_video.manager import ParseManager
+
+    output = tmp_path / "out"
+    output.mkdir()
+    existing = output / "2026-09-28-13-58-source-001-report.json"
+    existing.write_text("preserved")
+    assert (
+        ParseManager().run(
+            [tmp_path / "2026-09-28-13-58.mp4"], output, "withoutEggs", 50, Corrections()
+        )
+        == 1
+    )
+    assert existing.read_text() == "preserved"
+    assert list(output.iterdir()) == [existing]
+
+
+def test_exports_two_games_and_same_basename_without_collision(tmp_path, observations, sample_game):
+    import json
+    from copy import deepcopy
+
+    from domino_video.corrections import Corrections
+    from domino_video.manager import ParseManager
+
+    second = deepcopy(observations)
+    for o in second:
+        o.time += 300
+    combined = observations + second
+
+    class Reader:
+        def frames(self, path):
+            for o in combined if path.parent.name == "first" else observations:
+                yield o.time, o
+
+    class Recognizer:
+        def observe(self, image, timestamp, read_text):
+            return image
+
+    paths = []
+    for folder in ["first", "second"]:
+        p = tmp_path / folder / "same_2026-09-28-13-58.mp4"
+        p.parent.mkdir()
+        p.write_bytes(b"fixture")
+        paths.append(p)
+    output = tmp_path / "out"
+    assert (
+        ParseManager(Reader(), Recognizer()).run(paths, output, "withoutEggs", 50, Corrections())
+        == 0
+    )
+    files = sorted(output.glob("*game*.json"))
+    assert len(files) == 3
+    assert [p.name for p in files] == [
+        "2026-09-28-13-58-source-001-game-001.json",
+        "2026-09-28-13-58-source-001-game-002.json",
+        "2026-09-28-13-58-source-002-game-001.json",
+    ]
+    for path in files:
+        assert json.loads(path.read_text(encoding="utf-8")) == sample_game
+
+
+def test_fallback_time_shared_by_all_outputs_and_ambiguous_source_continues(tmp_path, observations):
+    import json
+    from copy import deepcopy
+    from datetime import datetime, timedelta, timezone
+
+    from domino_video.corrections import Corrections
+    from domino_video.manager import ParseManager
+    from domino_video.recording_time import RecordingTimeResolver
+
+    later = deepcopy(observations)
+    for o in later:
+        o.time += 300
+
+    class Reader:
+        def frames(self, path):
+            for o in observations + later:
+                yield o.time, o
+
+    class Recognizer:
+        def observe(self, image, timestamp, read_text):
+            return image
+
+    calls = []
+
+    def clock():
+        calls.append(1)
+        return datetime(2026, 9, 28, 15, 4, 3, 7999, tzinfo=timezone.utc)
+
+    ambiguous = tmp_path / "2026-09-28-13-58_2026-09-29-13-58.mp4"
+    valid = tmp_path / "video.mp4"
+    for p in [ambiguous, valid]:
+        p.write_bytes(b"fixture")
+    output = tmp_path / "out"
+    code = ParseManager(
+        Reader(),
+        Recognizer(),
+        RecordingTimeResolver(
+            clock=clock, to_local=lambda value: value.astimezone(timezone(timedelta(hours=3)))
+        ),
+    ).run([ambiguous, valid], output, "withoutEggs", 50, Corrections())
+    assert code == 1
+    assert calls == [1]
+    assert sorted(p.name for p in output.iterdir()) == [
+        "2026-09-28-18-04-03-007-source-002-game-001.json",
+        "2026-09-28-18-04-03-007-source-002-game-002.json",
+        "2026-09-28-18-04-03-007-source-002-report.json",
+        "undated-source-001-report.json",
+    ]
+    report = json.loads(
+        (output / "2026-09-28-18-04-03-007-source-002-report.json").read_text(encoding="utf-8")
+    )
+    assert report["recording_time"]["source"] == "current_time"
+    assert report["recording_time"]["reason"]
+    assert report["status"] == "ok"
+
+
+def test_rejects_conflicting_score(tmp_path, observations):
+    from domino_video.corrections import Corrections
+    from domino_video.manager import ParseManager
+
+    for o in observations:
+        if o.scores and o.time > 284:
+            o.scores = (97, 29)
+
+    class Reader:
+        def frames(self, path):
+            for o in observations:
+                yield o.time, o
+
+    class Recognizer:
+        def observe(self, image, timestamp, read_text):
+            return image
+
+    p = tmp_path / "video.mp4"
+    p.write_bytes(b"fixture")
+    assert (
+        ParseManager(Reader(), Recognizer()).run(
+            [p], tmp_path / "out", "withoutEggs", 50, Corrections()
+        )
+        == 1
+    )
+    assert not list((tmp_path / "out").glob("*game*.json"))
+
+
+def test_name_correction_restores_export_and_bad_input_does_not_stop_it(
+    tmp_path, observations, sample_game
+):
+    import hashlib
+    import json
+
+    from domino_video.corrections import Corrections
+    from domino_video.manager import ParseManager
+
+    for o in observations:
+        o.names = None
+
+    class Reader:
+        def frames(self, path):
+            for o in observations:
+                yield o.time, o
+
+    class Recognizer:
+        def observe(self, image, timestamp, read_text):
+            return image
+
+    source = tmp_path / "valid.mp4"
+    source.write_bytes(b"fixture")
+    fix = Corrections(
+        {
+            "sources": [
+                {
+                    "sha256": hashlib.sha256(b"fixture").hexdigest(),
+                    "games": [{"number": 1, "teams": sample_game["teams"], "rounds": []}],
+                }
+            ]
+        }
+    )
+    output = tmp_path / "out"
+    code = ParseManager(Reader(), Recognizer()).run(
+        [tmp_path / "missing.mp4", source], output, "withoutEggs", 50, fix
+    )
+    assert code == 1
+    game = next(output.glob("*game*.json"))
+    assert json.loads(game.read_text(encoding="utf-8")) == sample_game

@@ -1,0 +1,22 @@
+[
+  {
+    "file": "kozel-game.schema.json",
+    "source": "docs/formats/kozel-game.schema.json",
+    "sha256": "a883f2be225c88dc38dac8f7edcedb069bf451b80197d6b0f17a75bb4f1c4872"
+  },
+  {
+    "file": "kozel-game.example.json",
+    "source": "docs/formats/kozel-game.example.json",
+    "sha256": "3e1d640d33cfaa695b3abad1a271a82e50605968d3489799bc6f6fff7c47121f"
+  },
+  {
+    "file": "format.md",
+    "source": "docs/formats/README.md",
+    "sha256": "1e97146292b508ab766af3357144f2c47e6d69cc08052ff42098aaf2a2c82add"
+  },
+  {
+    "file": "rules.md",
+    "source": "openspec/changes/add-kozel-fish-variants/specs/kozel-rules/spec.md",
+    "sha256": "9d86ab678668f84eb4316d038de1d9e61eb5c68f8497229f66f08c9c8d78344b"
+  }
+]

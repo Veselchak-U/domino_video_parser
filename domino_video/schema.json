@@ -1,0 +1,518 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Завершённая партия «Козла», компактный журнал v1",
+  "description": "Документный контракт. Структура проверяется схемой; имена, законность раздач и ходов, счёт и завершённость — последовательным воспроизведением по README.md.",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "kozel-game-v1"
+    },
+    "fishVariant": {
+      "enum": [
+        "withEggs",
+        "withoutEggs"
+      ]
+    },
+    "scoreLimit": {
+      "type": "integer",
+      "enum": [101, 50],
+      "description": "Выбранный при создании партии лимит записанных штрафных очков; не меняется между конами."
+    },
+    "teams": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/team"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "rounds": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/round"
+      }
+    },
+    "result": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "winner": {
+              "$ref": "#/$defs/name"
+            }
+          },
+          "required": [
+            "winner"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "draw": {
+              "const": true
+            }
+          },
+          "required": [
+            "draw"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "format",
+    "fishVariant",
+    "scoreLimit",
+    "teams",
+    "rounds",
+    "result"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "fishVariant": {
+            "const": "withoutEggs"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "rounds": {
+            "items": {
+              "properties": {
+                "result": {
+                  "not": {
+                    "required": [
+                      "eggs"
+                    ]
+                  },
+                  "properties": {
+                    "reason": {
+                      "enum": [
+                        "emptyHand",
+                        "fish"
+                      ]
+                    }
+                  },
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {
+                          "reason": {
+                            "const": "fish"
+                          }
+                        }
+                      },
+                      "then": {
+                        "properties": {
+                          "winner_team": {
+                            "type": "null"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "fishVariant": {
+            "const": "withEggs"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "required": [
+              "winner"
+            ]
+          },
+          "rounds": {
+            "items": {
+              "properties": {
+                "result": {
+                  "if": {
+                    "properties": {
+                      "reason": {
+                        "const": "fish"
+                      }
+                    }
+                  },
+                  "then": {
+                    "properties": {
+                      "winner_team": {
+                        "$ref": "#/$defs/name"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "stone": {
+      "type": "string",
+      "enum": [
+        "0-0",
+        "0-1",
+        "0-2",
+        "0-3",
+        "0-4",
+        "0-5",
+        "0-6",
+        "1-1",
+        "1-2",
+        "1-3",
+        "1-4",
+        "1-5",
+        "1-6",
+        "2-2",
+        "2-3",
+        "2-4",
+        "2-5",
+        "2-6",
+        "3-3",
+        "3-4",
+        "3-5",
+        "3-6",
+        "4-4",
+        "4-5",
+        "4-6",
+        "5-5",
+        "5-6",
+        "6-6"
+      ]
+    },
+    "team": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "players": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/player"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "players"
+      ],
+      "additionalProperties": false
+    },
+    "player": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "seat": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        }
+      },
+      "required": [
+        "name",
+        "seat"
+      ],
+      "additionalProperties": false
+    },
+    "deal": {
+      "type": "object",
+      "minProperties": 4,
+      "maxProperties": 4,
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/stone"
+        },
+        "minItems": 7,
+        "maxItems": 7,
+        "uniqueItems": true
+      }
+    },
+    "move": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "player": {
+              "$ref": "#/$defs/name"
+            },
+            "action": {
+              "const": "pass"
+            }
+          },
+          "required": [
+            "player",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "player": {
+              "$ref": "#/$defs/name"
+            },
+            "action": {
+              "enum": [
+                "left",
+                "right"
+              ]
+            },
+            "stone": {
+              "$ref": "#/$defs/stone"
+            }
+          },
+          "required": [
+            "player",
+            "action",
+            "stone"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "player": {
+              "$ref": "#/$defs/name"
+            },
+            "action": {
+              "const": "start"
+            },
+            "stone": {
+              "type": "string",
+              "pattern": "^[0-6]-[0-6]$"
+            }
+          },
+          "required": [
+            "player",
+            "action",
+            "stone"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "round": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Порядковый номер кона, начиная с 1; совпадает с позицией в массиве rounds."
+        },
+        "deal": {
+          "$ref": "#/$defs/deal"
+        },
+        "moves": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/move"
+          },
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/move"
+                },
+                {
+                  "properties": {
+                    "action": {
+                      "const": "start"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "result": {
+          "$ref": "#/$defs/roundResult"
+        }
+      },
+      "required": [
+        "number",
+        "deal",
+        "moves",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "roundResult": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "enum": [
+            "emptyHand",
+            "fish",
+            "eggs"
+          ]
+        },
+        "finished_player": {
+          "$ref": "#/$defs/name"
+        },
+        "winner_team": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "round_score": {
+          "type": "object",
+          "minProperties": 2,
+          "maxProperties": 2,
+          "propertyNames": {
+            "$ref": "#/$defs/name"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Очки, начисленные команде за этот кон: собственный штраф и назначенный перенос яиц, в запись или на забор. Прежний забор повторно не учитывается."
+        },
+        "total_score": {
+          "type": "object",
+          "minProperties": 2,
+          "maxProperties": 2,
+          "propertyNames": {
+            "$ref": "#/$defs/name"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Общая записанная сумма после кона, без забора и неназначенных яиц."
+        },
+        "fence": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 2,
+          "propertyNames": {
+            "$ref": "#/$defs/name"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "eggs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "reason",
+        "finished_player",
+        "winner_team",
+        "round_score",
+        "total_score"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "emptyHand"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "eggs"
+              ]
+            },
+            "properties": {
+              "winner_team": {
+                "$ref": "#/$defs/name"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "fish"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "eggs"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "eggs"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "eggs"
+            ],
+            "properties": {
+              "winner_team": {
+                "type": "null"
+              },
+              "round_score": {
+                "additionalProperties": {
+                  "const": 0
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

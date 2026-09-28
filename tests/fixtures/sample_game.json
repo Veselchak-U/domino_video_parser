@@ -1,0 +1,557 @@
+{
+  "format": "kozel-game-v1",
+  "fishVariant": "withoutEggs",
+  "scoreLimit": 50,
+  "teams": [
+    {
+      "id": "A",
+      "name": "Team A",
+      "players": [
+        {
+          "name": "You",
+          "seat": 1
+        },
+        {
+          "name": "Player_130584019",
+          "seat": 3
+        }
+      ]
+    },
+    {
+      "id": "B",
+      "name": "Team B",
+      "players": [
+        {
+          "name": "Mohammed>.",
+          "seat": 2
+        },
+        {
+          "name": "Player_68899011",
+          "seat": 4
+        }
+      ]
+    }
+  ],
+  "rounds": [
+    {
+      "number": 1,
+      "deal": {
+        "You": [
+          "0-6",
+          "1-1",
+          "1-4",
+          "2-3",
+          "2-4",
+          "3-6",
+          "4-4"
+        ],
+        "Mohammed>.": [
+          "0-0",
+          "0-3",
+          "0-4",
+          "1-6",
+          "3-3",
+          "3-5",
+          "4-6"
+        ],
+        "Player_130584019": [
+          "0-1",
+          "0-2",
+          "0-5",
+          "1-5",
+          "2-2",
+          "4-5",
+          "5-5"
+        ],
+        "Player_68899011": [
+          "1-2",
+          "1-3",
+          "2-5",
+          "2-6",
+          "3-4",
+          "5-6",
+          "6-6"
+        ]
+      },
+      "moves": [
+        {
+          "player": "You",
+          "action": "start",
+          "stone": "1-1"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "left",
+          "stone": "1-6"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "right",
+          "stone": "0-1"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "left",
+          "stone": "6-6"
+        },
+        {
+          "player": "You",
+          "action": "left",
+          "stone": "0-6"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "right",
+          "stone": "0-0"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "right",
+          "stone": "0-5"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "right",
+          "stone": "2-5"
+        },
+        {
+          "player": "You",
+          "action": "right",
+          "stone": "2-4"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "right",
+          "stone": "4-6"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "left",
+          "stone": "0-2"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "left",
+          "stone": "2-6"
+        },
+        {
+          "player": "You",
+          "action": "right",
+          "stone": "3-6"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "right",
+          "stone": "3-3"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "pass"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "right",
+          "stone": "1-3"
+        },
+        {
+          "player": "You",
+          "action": "right",
+          "stone": "1-4"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "right",
+          "stone": "0-4"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "pass"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "left",
+          "stone": "5-6"
+        },
+        {
+          "player": "You",
+          "action": "pass"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "left",
+          "stone": "3-5"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "pass"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "left",
+          "stone": "3-4"
+        },
+        {
+          "player": "You",
+          "action": "left",
+          "stone": "4-4"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "right",
+          "stone": "0-3"
+        }
+      ],
+      "result": {
+        "reason": "emptyHand",
+        "finished_player": "Mohammed>.",
+        "winner_team": "Team B",
+        "round_score": {
+          "Team A": 34,
+          "Team B": 0
+        },
+        "total_score": {
+          "Team A": 34,
+          "Team B": 0
+        }
+      }
+    },
+    {
+      "number": 2,
+      "deal": {
+        "You": [
+          "0-2",
+          "0-4",
+          "1-5",
+          "2-4",
+          "3-4",
+          "3-5",
+          "4-4"
+        ],
+        "Mohammed>.": [
+          "0-1",
+          "0-3",
+          "1-4",
+          "2-6",
+          "3-3",
+          "5-5",
+          "6-6"
+        ],
+        "Player_130584019": [
+          "0-5",
+          "0-6",
+          "1-1",
+          "2-2",
+          "2-3",
+          "2-5",
+          "5-6"
+        ],
+        "Player_68899011": [
+          "0-0",
+          "1-2",
+          "1-3",
+          "1-6",
+          "3-6",
+          "4-5",
+          "4-6"
+        ]
+      },
+      "moves": [
+        {
+          "player": "Mohammed>.",
+          "action": "start",
+          "stone": "6-6"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "left",
+          "stone": "5-6"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "left",
+          "stone": "4-5"
+        },
+        {
+          "player": "You",
+          "action": "left",
+          "stone": "4-4"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "left",
+          "stone": "1-4"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "left",
+          "stone": "1-1"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "left",
+          "stone": "1-6"
+        },
+        {
+          "player": "You",
+          "action": "pass"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "right",
+          "stone": "2-6"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "left",
+          "stone": "0-6"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "left",
+          "stone": "0-0"
+        },
+        {
+          "player": "You",
+          "action": "right",
+          "stone": "2-4"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "left",
+          "stone": "0-3"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "left",
+          "stone": "2-3"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "right",
+          "stone": "4-6"
+        },
+        {
+          "player": "You",
+          "action": "left",
+          "stone": "0-2"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "left",
+          "stone": "0-1"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "pass"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "left",
+          "stone": "1-3"
+        },
+        {
+          "player": "You",
+          "action": "left",
+          "stone": "3-5"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "left",
+          "stone": "5-5"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "left",
+          "stone": "2-5"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "left",
+          "stone": "1-2"
+        },
+        {
+          "player": "You",
+          "action": "left",
+          "stone": "1-5"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "pass"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "left",
+          "stone": "0-5"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "right",
+          "stone": "3-6"
+        }
+      ],
+      "result": {
+        "reason": "emptyHand",
+        "finished_player": "Player_68899011",
+        "winner_team": "Team B",
+        "round_score": {
+          "Team A": 15,
+          "Team B": 0
+        },
+        "total_score": {
+          "Team A": 49,
+          "Team B": 0
+        }
+      }
+    },
+    {
+      "number": 3,
+      "deal": {
+        "You": [
+          "0-5",
+          "0-6",
+          "1-1",
+          "1-6",
+          "3-3",
+          "4-4",
+          "4-5"
+        ],
+        "Mohammed>.": [
+          "1-3",
+          "1-4",
+          "2-2",
+          "2-4",
+          "2-5",
+          "3-4",
+          "3-5"
+        ],
+        "Player_130584019": [
+          "0-0",
+          "0-1",
+          "0-2",
+          "1-5",
+          "2-6",
+          "4-6",
+          "5-6"
+        ],
+        "Player_68899011": [
+          "0-3",
+          "0-4",
+          "1-2",
+          "2-3",
+          "3-6",
+          "5-5",
+          "6-6"
+        ]
+      },
+      "moves": [
+        {
+          "player": "Player_68899011",
+          "action": "start",
+          "stone": "6-6"
+        },
+        {
+          "player": "You",
+          "action": "left",
+          "stone": "0-6"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "pass"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "left",
+          "stone": "0-0"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "left",
+          "stone": "0-3"
+        },
+        {
+          "player": "You",
+          "action": "left",
+          "stone": "3-3"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "left",
+          "stone": "3-4"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "left",
+          "stone": "4-6"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "right",
+          "stone": "3-6"
+        },
+        {
+          "player": "You",
+          "action": "left",
+          "stone": "1-6"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "left",
+          "stone": "1-3"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "pass"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "right",
+          "stone": "2-3"
+        },
+        {
+          "player": "You",
+          "action": "pass"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "right",
+          "stone": "2-4"
+        },
+        {
+          "player": "Player_130584019",
+          "action": "pass"
+        },
+        {
+          "player": "Player_68899011",
+          "action": "right",
+          "stone": "0-4"
+        },
+        {
+          "player": "You",
+          "action": "right",
+          "stone": "0-5"
+        },
+        {
+          "player": "Mohammed>.",
+          "action": "right",
+          "stone": "3-5"
+        }
+      ],
+      "result": {
+        "reason": "fish",
+        "finished_player": "Mohammed>.",
+        "winner_team": null,
+        "round_score": {
+          "Team A": 47,
+          "Team B": 29
+        },
+        "total_score": {
+          "Team A": 96,
+          "Team B": 29
+        }
+      }
+    }
+  ],
+  "result": {
+    "winner": "Team B"
+  }
+}

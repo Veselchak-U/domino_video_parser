@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "domino-video"
+version = "0.1.0"
+description = "Локальный разбор записей командного домино"
+requires-python = ">=3.11"
+dependencies = ["av==18.1.0", "opencv-python==5.0.0.93", "rapidocr-onnxruntime==1.4.4", "jsonschema==4.26.0"]
+
+[project.optional-dependencies]
+test = ["pytest==9.1.1"]
+
+[project.scripts]
+domino-video-parser = "domino_video.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["domino_video*"]
+
+[tool.setuptools.package-data]
+domino_video = ["*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.format]
+line-ending = "lf"

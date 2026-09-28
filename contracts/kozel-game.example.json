@@ -1,0 +1,104 @@
+{
+  "format": "kozel-game-v1",
+  "fishVariant": "withEggs",
+  "scoreLimit": 101,
+  "teams": [
+    {"id": "north", "name": "Север", "players": [{"name": "Анна", "seat": 1}, {"name": "Иван", "seat": 3}]},
+    {"id": "south", "name": "Юг", "players": [{"name": "Борис", "seat": 2}, {"name": "Дарья", "seat": 4}]}
+  ],
+  "rounds": [
+    {
+      "number": 1,
+      "deal": {
+        "Анна": ["0-4", "1-1", "1-2", "2-5", "2-6", "3-5", "4-5"],
+        "Борис": ["0-0", "0-1", "0-2", "0-3", "0-6", "2-4", "3-3"],
+        "Иван": ["1-5", "1-6", "2-2", "2-3", "3-4", "4-6", "6-6"],
+        "Дарья": ["0-5", "1-3", "1-4", "3-6", "4-4", "5-5", "5-6"]
+      },
+      "moves": [
+        {"player": "Анна", "action": "start", "stone": "1-1"},
+        {"player": "Борис", "action": "left", "stone": "0-1"},
+        {"player": "Иван", "action": "right", "stone": "1-6"},
+        {"player": "Дарья", "action": "left", "stone": "0-5"},
+        {"player": "Анна", "action": "left", "stone": "3-5"},
+        {"player": "Борис", "action": "right", "stone": "0-6"},
+        {"player": "Иван", "action": "left", "stone": "3-4"},
+        {"player": "Дарья", "action": "left", "stone": "1-4"},
+        {"player": "Анна", "action": "left", "stone": "1-2"},
+        {"player": "Борис", "action": "right", "stone": "0-2"},
+        {"player": "Иван", "action": "right", "stone": "2-3"},
+        {"player": "Дарья", "action": "right", "stone": "3-6"},
+        {"player": "Анна", "action": "right", "stone": "2-6"},
+        {"player": "Борис", "action": "left", "stone": "2-4"},
+        {"player": "Иван", "action": "left", "stone": "4-6"},
+        {"player": "Дарья", "action": "left", "stone": "5-6"},
+        {"player": "Анна", "action": "left", "stone": "2-5"},
+        {"player": "Борис", "action": "pass"},
+        {"player": "Иван", "action": "right", "stone": "2-2"}
+      ],
+      "result": {"reason": "eggs", "finished_player": "Анна", "winner_team": null, "round_score": {"Север": 0, "Юг": 0}, "total_score": {"Север": 0, "Юг": 0}, "eggs": 62}
+    },
+    {
+      "number": 2,
+      "deal": {
+        "Анна": ["0-5", "0-6", "2-3", "2-4", "3-3", "4-6", "6-6"],
+        "Борис": ["0-4", "1-1", "1-3", "1-4", "2-2", "2-6", "3-6"],
+        "Иван": ["0-0", "1-2", "1-5", "1-6", "4-4", "4-5", "5-6"],
+        "Дарья": ["0-1", "0-2", "0-3", "2-5", "3-4", "3-5", "5-5"]
+      },
+      "moves": [
+        {"player": "Борис", "action": "start", "stone": "1-1"},
+        {"player": "Иван", "action": "left", "stone": "1-5"},
+        {"player": "Дарья", "action": "left", "stone": "5-5"},
+        {"player": "Анна", "action": "left", "stone": "0-5"},
+        {"player": "Борис", "action": "right", "stone": "1-4"},
+        {"player": "Иван", "action": "right", "stone": "4-5"},
+        {"player": "Дарья", "action": "right", "stone": "2-5"},
+        {"player": "Анна", "action": "left", "stone": "0-6"},
+        {"player": "Борис", "action": "right", "stone": "2-2"},
+        {"player": "Иван", "action": "left", "stone": "5-6"},
+        {"player": "Дарья", "action": "left", "stone": "3-5"},
+        {"player": "Анна", "action": "right", "stone": "2-3"},
+        {"player": "Борис", "action": "left", "stone": "3-6"},
+        {"player": "Иван", "action": "left", "stone": "1-6"},
+        {"player": "Дарья", "action": "right", "stone": "3-4"},
+        {"player": "Анна", "action": "right", "stone": "2-4"},
+        {"player": "Борис", "action": "left", "stone": "1-3"},
+        {"player": "Иван", "action": "right", "stone": "1-2"},
+        {"player": "Дарья", "action": "left", "stone": "0-3"},
+        {"player": "Анна", "action": "pass"},
+        {"player": "Борис", "action": "left", "stone": "0-4"},
+        {"player": "Иван", "action": "left", "stone": "4-4"},
+        {"player": "Дарья", "action": "right", "stone": "0-1"},
+        {"player": "Анна", "action": "left", "stone": "4-6"},
+        {"player": "Борис", "action": "left", "stone": "2-6"}
+      ],
+      "result": {"reason": "emptyHand", "finished_player": "Борис", "winner_team": "Юг", "round_score": {"Север": 90, "Юг": 0}, "total_score": {"Север": 90, "Юг": 0}}
+    },
+    {
+      "number": 3,
+      "deal": {
+        "Анна": ["0-2", "1-6", "2-3", "3-3", "3-4", "3-5", "5-6"],
+        "Борис": ["0-1", "0-3", "1-3", "2-2", "2-5", "4-4", "4-6"],
+        "Иван": ["0-6", "1-4", "1-5", "2-6", "4-5", "5-5", "6-6"],
+        "Дарья": ["0-0", "0-4", "0-5", "1-1", "1-2", "2-4", "3-6"]
+      },
+      "moves": [
+        {"player": "Борис", "action": "start", "stone": "4-6"},
+        {"player": "Иван", "action": "right", "stone": "2-6"},
+        {"player": "Дарья", "action": "left", "stone": "2-4"},
+        {"player": "Анна", "action": "right", "stone": "2-3"},
+        {"player": "Борис", "action": "left", "stone": "2-2"},
+        {"player": "Иван", "action": "pass"},
+        {"player": "Дарья", "action": "left", "stone": "1-2"},
+        {"player": "Анна", "action": "right", "stone": "3-5"},
+        {"player": "Борис", "action": "right", "stone": "2-5"},
+        {"player": "Иван", "action": "left", "stone": "1-5"},
+        {"player": "Дарья", "action": "left", "stone": "0-5"},
+        {"player": "Анна", "action": "left", "stone": "0-2"}
+      ],
+      "result": {"reason": "fish", "finished_player": "Анна", "winner_team": "Юг", "round_score": {"Север": 73, "Юг": 0}, "total_score": {"Север": 163, "Юг": 0}}
+    }
+  ],
+  "result": {"winner": "Юг"}
+}
