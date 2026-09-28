@@ -21,7 +21,7 @@ class ParseManager:
         self._storage = ExportStorage()
         self._time_resolver = time_resolver or RecordingTimeResolver()
 
-    def run(self, paths, output, variant, limit, corrections, workers=1):
+    def run(self, paths, output, variant, limit, corrections, workers=1, device="cpu"):
         progress = ConsoleProgress()
         progress.message(f"Процессов распознавания: {workers}")
         failures = False
@@ -56,7 +56,7 @@ class ParseManager:
                     report["recording_time"] = asdict(recording_time)
                     if path in hash_errors:
                         raise ValueError(hash_errors[path])
-                    observations = self._observe(path, workers, progress)
+                    observations = self._observe(path, workers, progress, device)
                     progress.update(99, "проверка и сохранение")
                     rounds = self._reconstructor.extract(observations)
                     if not rounds:
@@ -143,11 +143,13 @@ class ParseManager:
                     progress.message(f"Сохранено: {target}")
         return int(failures)
 
-    def _observe(self, path, workers, progress):
+    def _observe(self, path, workers, progress, device="cpu"):
         timeline = self._reader.timeline(
             path, lambda: progress.update(0, "определение длительности")
         )
-        pipeline = ObservationPipeline(workers, recognizer=self._recognizer)
+        pipeline = ObservationPipeline(
+            workers, recognizer=self._recognizer, device=device, message=progress.message
+        )
         result = []
         with closing(pipeline.observe(self._reader.frames(path))) as observations:
             for observation in observations:

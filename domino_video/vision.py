@@ -1,5 +1,6 @@
 """Визуальный профиль записи: координаты нормализованы к 1608×720."""
 
+import re
 from dataclasses import dataclass
 
 import cv2
@@ -35,6 +36,35 @@ class Observation:
     counts: tuple[int | None, ...] | None = None
 
 
+@dataclass
+class PreparedObservation:
+    observation: Observation
+    crops: dict[str, list[np.ndarray]]
+
+    def finish(self, text):
+        result = self.observation
+        if "names" in self.crops:
+            names = [text(crop).strip() for crop in self.crops["names"]]
+            result.names = names if all(names) and len(set(names)) == 4 else None
+            own_count = len(result.hands[0])
+            counts = [own_count if own_count <= 7 else None]
+            for crop in self.crops["counts"]:
+                match = re.fullmatch(r"[0-7]", text(crop).strip())
+                counts.append(int(match[0]) if match else None)
+            result.counts = tuple(counts)
+        if "scores" in self.crops:
+            values = []
+            for crop in self.crops["scores"]:
+                match = re.search(r"(\d+)\s*/\s*(50|101)", text(crop))
+                if not match:
+                    break
+                values.append(tuple(map(int, match.groups())))
+            if len(values) == 2 and values[0][1] == values[1][1]:
+                result.scores = (values[0][0], values[1][0])
+                result.limit = values[0][1]
+        return result
+
+
 class ScreenRecognizer:
     def __init__(self):
         self._ocr = None
@@ -55,6 +85,9 @@ class ScreenRecognizer:
         return max(candidates, key=lambda pair: pair[0])[1]
 
     def observe(self, image, time, read_text=False):
+        return self.prepare(image, time, read_text).finish(self._text)
+
+    def prepare(self, image, time, read_text=False):
         im = self.normalize(image)
         hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
         table = hsv[150:550, 200:1450]
@@ -87,12 +120,31 @@ class ScreenRecognizer:
             )
         active = int(np.argmax(intensity)) if max(intensity) > 500 and not reveal else None
         result = Observation(time, board, hands, active, reveal, supported)
+        crops = {}
         if read_text and supported and not reveal:
-            result.names = self._read_names(im)
-            result.counts = self._read_counts(im, len(hands[0]))
+            crops["names"] = [
+                im[y:y2, x:x2].copy()
+                for x, y, x2, y2 in [
+                    (100, 620, 250, 665),
+                    (230, 42, 410, 94),
+                    (765, 42, 958, 94),
+                    (1285, 42, 1500, 94),
+                ]
+            ]
+            crops["counts"] = [
+                cv2.resize(im[y:y2, x:x2], None, fx=3, fy=3)
+                for x, y, x2, y2 in [
+                    (180, 99, 237, 162),
+                    (712, 99, 770, 164),
+                    (1245, 99, 1299, 164),
+                ]
+            ]
         if supported and (read_text or (not board and not reveal)):
-            result.scores, result.limit = self._read_scores(im)
-        return result
+            crops["scores"] = [
+                cv2.resize(im[y:y2, x:x2], None, fx=3, fy=3)
+                for x, y, x2, y2 in [(740, 88, 902, 135), (230, 88, 383, 135)]
+            ]
+        return PreparedObservation(result, crops)
 
     def _stones(self, im, hsv):
         mask = cv2.inRange(hsv, np.array([12, 15, 195]), np.array([40, 230, 255]))
@@ -130,38 +182,3 @@ class ScreenRecognizer:
             self._ocr = RapidOCR(intra_op_num_threads=1, inter_op_num_threads=1)
         rows, _ = self._ocr(crop)
         return " ".join(row[1] for row in (rows or []) if row[2] > 0.8)
-
-    def _read_names(self, im):
-        names = []
-        for x, y, x2, y2 in [
-            (100, 620, 250, 665),
-            (230, 42, 410, 94),
-            (765, 42, 958, 94),
-            (1285, 42, 1500, 94),
-        ]:
-            names.append(self._text(im[y:y2, x:x2]).strip())
-        return names if all(names) and len(set(names)) == 4 else None
-
-    def _read_scores(self, im):
-        import re
-
-        values = []
-        for x, y, x2, y2 in [(740, 88, 902, 135), (230, 88, 383, 135)]:
-            text = self._text(cv2.resize(im[y:y2, x:x2], None, fx=3, fy=3))
-            match = re.search(r"(\d+)\s*/\s*(50|101)", text)
-            if not match:
-                return None, None
-            values.append(tuple(map(int, match.groups())))
-        if values[0][1] != values[1][1]:
-            return None, None
-        return (values[0][0], values[1][0]), values[0][1]
-
-    def _read_counts(self, im, own_count):
-        import re
-
-        counts = [own_count if own_count <= 7 else None]
-        for x, y, x2, y2 in [(180, 99, 237, 162), (712, 99, 770, 164), (1245, 99, 1299, 164)]:
-            text = self._text(cv2.resize(im[y:y2, x:x2], None, fx=3, fy=3))
-            match = re.fullmatch(r"[0-7]", text.strip())
-            counts.append(int(match[0]) if match else None)
-        return tuple(counts)

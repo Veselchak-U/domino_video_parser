@@ -3,11 +3,12 @@ import multiprocessing
 import os
 import signal
 import sys
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from contextlib import closing
 
 import cv2
 
+from .ocr import DeviceOCR
 from .vision import ScreenRecognizer
 
 
@@ -48,15 +49,27 @@ def _observe_frame(image, timestamp, read_text):
     return _recognizer.observe(image, timestamp, read_text)
 
 
+def _prepare_frame(image, timestamp, read_text):
+    return _recognizer.prepare(image, timestamp, read_text)
+
+
 class ObservationPipeline:
-    def __init__(self, workers=1, recognizer=None):
+    def __init__(self, workers=1, recognizer=None, device="cpu", message=None):
         self.workers = workers
         self._recognizer = recognizer
+        self._device = device
+        self._message = message
 
     def observe(self, frames):
+        with closing(frames), DeviceOCR(self._device) as gpu:
+            if self._message:
+                self._message(gpu.description)
+            yield from self._observe(frames, gpu)
+
+    def _observe(self, frames, gpu):
         cv2.setNumThreads(1)
         with closing(frames):
-            if self.workers == 1:
+            if self.workers == 1 and not gpu.enabled:
                 recognizer = self._recognizer or ScreenRecognizer()
                 for image, timestamp, read_text in self._jobs(frames):
                     yield recognizer.observe(image, timestamp, read_text)
@@ -65,11 +78,17 @@ class ObservationPipeline:
             ready = {}
             submitted = emitted = 0
             exhausted = False
-            executor = ProcessPoolExecutor(
-                max_workers=self.workers,
-                mp_context=multiprocessing.get_context("spawn"),
-                initializer=_initialize_worker,
+            executor = (
+                ProcessPoolExecutor(
+                    max_workers=self.workers,
+                    mp_context=multiprocessing.get_context("spawn"),
+                    initializer=_initialize_worker,
+                )
+                if self.workers > 1
+                else None
             )
+            gpu_pending = set()
+            recognizer = self._recognizer or ScreenRecognizer()
             try:
                 jobs = iter(self._jobs(frames))
                 while pending or not exhausted:
@@ -82,13 +101,32 @@ class ObservationPipeline:
                         if job is None:
                             exhausted = True
                             break
-                        pending[executor.submit(_observe_frame, *job)] = submitted
+                        if executor is None:
+                            future = Future()
+                            future.set_result(recognizer.prepare(*job))
+                        else:
+                            future = executor.submit(
+                                _prepare_frame if gpu.enabled else _observe_frame, *job
+                            )
+                        pending[future] = submitted
                         submitted += 1
                     if not pending:
                         break
                     completed, _ = wait(pending, return_when=FIRST_COMPLETED)
                     for future in completed:
-                        ready[pending.pop(future)] = future.result()
+                        number = pending.pop(future)
+                        result = future.result()
+                        if gpu.enabled and future not in gpu_pending and result.crops:
+                            following = gpu.submit(result)
+                            pending[following] = number
+                            gpu_pending.add(following)
+                        else:
+                            ready[number] = (
+                                result.observation
+                                if gpu.enabled and future not in gpu_pending
+                                else result
+                            )
+                        gpu_pending.discard(future)
                     # Buffer only observations, never decoded images. The window
                     # bounds memory even if an early frame takes much longer.
                     while emitted in ready:
@@ -97,7 +135,8 @@ class ObservationPipeline:
             finally:
                 for future in pending:
                     future.cancel()
-                executor.shutdown(wait=True, cancel_futures=True)
+                if executor is not None:
+                    executor.shutdown(wait=True, cancel_futures=True)
 
     def _jobs(self, frames):
         last_text = -5

@@ -44,6 +44,12 @@ def main(argv=None):
         "--score-limit", required=True, type=int, choices=[50, 101], help="лимит партии"
     )
     parser.add_argument("--corrections", type=Path, help="JSON исправлений из отчёта")
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cpu", "gpu"],
+        default="auto",
+        help="устройство OCR: auto (по умолчанию), cpu или gpu (DirectML)",
+    )
     from .pipeline import WorkerSettings
 
     settings = WorkerSettings()
@@ -85,5 +91,11 @@ def main(argv=None):
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.error(f"Не удалось прочитать исправления: {error}")
     return ParseManager().run(
-        videos, args.output, args.fish_variant, args.score_limit, corrections, args.workers
+        videos,
+        args.output,
+        args.fish_variant,
+        args.score_limit,
+        corrections,
+        args.workers,
+        args.device,
     )
