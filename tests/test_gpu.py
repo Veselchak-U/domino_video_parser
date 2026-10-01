@@ -247,6 +247,7 @@ def test_prepared_crops_preserve_observations(name, read_text, expected):
     reading = OCRResult((OCRLine("0/50", 0.99),))
     actual = prepared.finish(lambda crop: reading)
     recognizer._read = lambda crop: reading
+    recognizer._read_name = lambda crop: reading
     assert actual == recognizer.observe(image, float(name), read_text)
 
 

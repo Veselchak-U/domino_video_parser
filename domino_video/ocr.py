@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .gpu_memory import probe_memory
 from .gpu_worker import GPUWorker
+from .name_ocr import NameOCR
 from .ocr_result import OCRResult
 
 
@@ -24,13 +25,17 @@ class DirectMLAdapter:
         import rapidocr_onnxruntime
         from rapidocr_onnxruntime import RapidOCR
 
+        name_model = NameOCR.model_path()
         self._engine = RapidOCR(intra_op_num_threads=1, inter_op_num_threads=1)
+        self._name_ocr = None
         self._sessions = []
+        self._shapes = []
         models = Path(rapidocr_onnxruntime.__file__).parent / "models"
         stages = [
             (self._engine.text_det.infer, "ch_PP-OCRv4_det_infer.onnx", (1, 3, 64, 64)),
             (self._engine.text_cls.infer, "ch_ppocr_mobile_v2.0_cls_infer.onnx", (1, 3, 48, 192)),
             (self._engine.text_rec.session, "ch_PP-OCRv4_rec_infer.onnx", (1, 3, 48, 320)),
+            (None, str(name_model), (1, 3, 48, 320)),
         ]
         try:
             for wrapper, filename, shape in stages:
@@ -41,7 +46,7 @@ class DirectMLAdapter:
                 options.inter_op_num_threads = 1
                 if profile_prefix:
                     options.enable_profiling = True
-                    options.profile_file_prefix = str(profile_prefix) + "-" + filename
+                    options.profile_file_prefix = str(profile_prefix) + "-" + Path(filename).name
                 session = ort.InferenceSession(
                     str(models / filename),
                     sess_options=options,
@@ -49,10 +54,14 @@ class DirectMLAdapter:
                 )
                 if session.get_providers()[0] != "DmlExecutionProvider":
                     raise RuntimeError(f"Модель {filename} не использует GPU DirectML")
+                self._sessions.append(session)
+                self._shapes.append(shape)
                 session.disable_fallback()
                 session.run(None, {session.get_inputs()[0].name: np.ones(shape, dtype=np.float32)})
-                wrapper.session = session
-                self._sessions.append(session)
+                if wrapper is not None:
+                    wrapper.session = session
+                else:
+                    self._name_ocr = NameOCR(self._engine, session)
         except BaseException:
             self.close()
             raise
@@ -60,9 +69,7 @@ class DirectMLAdapter:
     def probe(self):
         import numpy as np
 
-        for session, shape in zip(
-            self._sessions, [(1, 3, 64, 64), (1, 3, 48, 192), (1, 3, 48, 320)]
-        ):
+        for session, shape in zip(self._sessions, self._shapes):
             session.run(None, {session.get_inputs()[0].name: np.ones(shape, dtype=np.float32)})
 
     def text(self, crop):
@@ -72,10 +79,17 @@ class DirectMLAdapter:
         rows, _ = self._engine(crop)
         return OCRResult.from_rows(rows)
 
+    def read_name(self, crop):
+        return self._name_ocr.read(crop)
+
     def close(self):
+        if self._name_ocr is not None:
+            self._name_ocr.close()
+        self._name_ocr = None
         for session in self._sessions:
             session.end_profiling()
         self._sessions.clear()
+        self._shapes.clear()
         self._engine = None
 
 
@@ -103,6 +117,7 @@ class DeviceOCR:
         return ""
 
     def __enter__(self):
+        NameOCR.model_path()
         if self.mode == "cpu":
             return self
         try:

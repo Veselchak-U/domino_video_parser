@@ -1,10 +1,9 @@
 """Select evidence for final OCR failures, without decoding or writing files."""
 
-from collections import Counter
 from copy import deepcopy
 
 from .ocr_result import OCR_THRESHOLD
-from .reconstruct import NameRecognitionError, ScoreRecognitionError
+from .reconstruct import ScoreRecognitionError
 from .screen_profile import ScreenProfile
 
 
@@ -15,32 +14,19 @@ class RecognitionDiagnostics:
         "invalid_format": "неверный формат текста",
         "duplicate_name": "повтор имени",
         "no_frame": "нет пригодного кадра для OCR",
+        "partial_name": "нечитаемые символы заменены на *",
+        "generated_name": "ни одного символа имени не прочитано",
     }
     fields = {"name": "имя", "count": "счётчик камней", "score": "итоговый счёт"}
 
-    def build(self, observations, group, game_number, error=None):
+    def build(self, observations, group, game_number, error=None, resolved=None):
         start, end = group[0]["start"] - 10, group[-1]["end"] or float("inf")
         in_game = sorted((o for o in observations if start <= o.time <= end), key=lambda o: o.time)
         entries = []
-        if isinstance(error, NameRecognitionError):
-            readings = [[a for a in o.ocr_attempts if a["field"] == "name"] for o in in_game]
-            readings = [r for r in readings if len(r) == 4]
-            if readings:
-                best = max(
-                    readings,
-                    key=lambda r: len({a["accepted_text"] for a in r if a["accepted_text"]}),
-                )
-                duplicates = Counter(a["accepted_text"] for a in best)
-                for attempt in best:
-                    value = attempt["accepted_text"]
-                    if not value or duplicates[value] > 1:
-                        entry = self._entry(attempt, game_number)
-                        if value:
-                            entry["reason"] = "duplicate_name"
-                        entries.append(entry)
-            else:
-                entries.extend(self._missing("name", game_number, seat=i) for i in range(1, 5))
-
+        if resolved is not None:
+            entries.extend(
+                self._entry(a, game_number, severity="warning") for a in resolved.entries
+            )
         for seat in range(2, 5):
             attempts = [
                 a
@@ -115,7 +101,11 @@ class RecognitionDiagnostics:
             f"«{row['text']}» ({row['confidence']:.1%})" for row in entry["raw_rows"]
         )
         details = f"; OCR: {evidence}, порог > {entry['threshold']:.0%}" if evidence else ""
+        if "final_name" in entry:
+            details += f"; итоговое имя: «{entry['final_name']}»"
+        reason = ", ".join(self.reasons[r] for r in entry.get("reasons", [entry["reason"]]))
+        label = "предупреждение — " if entry["severity"] == "warning" else ""
         return (
-            f"{prefix}: {self.fields[entry['field']]}, {subject}, {time} — "
-            f"{self.reasons[entry['reason']]}{details}; {attachment}"
+            f"{prefix}: {label}{self.fields[entry['field']]}, {subject}, {time} — "
+            f"{reason}{details}; {attachment}"
         )

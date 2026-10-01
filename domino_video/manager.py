@@ -1,9 +1,9 @@
 import hashlib
-from collections import Counter
 from contextlib import closing
 from dataclasses import asdict
 
 from .pipeline import ObservationPipeline
+from .player_names import PlayerNameResolver
 from .progress import ConsoleProgress
 from .recognition_diagnostics import RecognitionDiagnostics
 from .recognition_samples import RecognitionSamples
@@ -83,10 +83,13 @@ class ParseManager:
                         record = dict(number=game_number, rounds=group, errors=[])
                         report["games"].append(record)
                         game_error = None
+                        resolved = None
                         try:
                             changed, teams = corrections.apply(hashes[path], game_number, group)
-                            names = self._names(observations, group)
+                            resolved = PlayerNameResolver().resolve(observations, group)
+                            names = resolved.names
                             if teams:
+                                resolved = None
                                 names = [
                                     p["name"]
                                     for p in sorted(
@@ -112,7 +115,7 @@ class ParseManager:
                             )
                             progress.message(f"Партия {game_number}: {error}")
                         entries = self._diagnostics.build(
-                            observations, group, game_number, game_error
+                            observations, group, game_number, game_error, resolved
                         )
                         record["recognition_diagnostics"] = entries
                         sample_failed = self._samples.write(
@@ -218,12 +221,6 @@ class ParseManager:
         if current:
             groups.append(current)
         return groups
-
-    def _names(self, observations, group):
-        start = group[0]["start"] - 10
-        end = group[-1]["end"] or float("inf")
-        names = Counter(tuple(o.names) for o in observations if start <= o.time <= end and o.names)
-        return list(names.most_common(1)[0][0]) if names else None
 
     def _check_scores(self, game, group, observations, limit):
         for i, (rnd, raw) in enumerate(zip(game["rounds"], group)):

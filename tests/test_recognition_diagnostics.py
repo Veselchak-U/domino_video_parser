@@ -9,8 +9,9 @@ import pytest
 from domino_video.corrections import Corrections
 from domino_video.manager import ParseManager
 from domino_video.ocr_result import OCRLine, OCRResult
+from domino_video.player_names import PlayerNameResolver
 from domino_video.recognition_diagnostics import RecognitionDiagnostics
-from domino_video.reconstruct import NameRecognitionError, ScoreRecognitionError
+from domino_video.reconstruct import ScoreRecognitionError
 from domino_video.video import VideoTimeline
 from domino_video.vision import Observation, ScreenRecognizer
 
@@ -57,7 +58,7 @@ def failing_names(observations):
                     )
                 ],
                 accepted_text=text,
-                threshold=0.8,
+                threshold=0.7,
                 reason="low_confidence" if seat == 2 else None,
             )
         )
@@ -78,19 +79,20 @@ def run_fixture(tmp_path, observations, reader=None, corrections=None):
 def test_failed_name_has_ocr_details_and_matching_sample(tmp_path, observations, capsys):
     timestamp = failing_names(observations)
     code, report, output, reader = run_fixture(tmp_path, observations)
-    assert code == 1
+    assert code == 0
     (entry,) = report["games"][0]["recognition_diagnostics"]
     assert (entry["field"], entry["seat"], entry["position"]) == ("name", 2, "слева сверху")
     assert entry["time"] == timestamp
     assert entry["raw_rows"] == [dict(text="MnX@/by", confidence=0.725)]
-    assert entry["accepted_text"] == "" and entry["reason"] == "low_confidence"
+    assert entry["accepted_text"] == "" and entry["reason"] == "generated_name"
+    assert entry["final_name"] == "Unrecognized_1" and entry["severity"] == "warning"
     assert entry["sample"]["time"] == timestamp
     sample = output / "report" / entry["sample"]["path"]
     assert np.array_equal(cv2.imread(str(sample)), reader.image[42:94, 230:410])
     assert reader.calls == [timestamp]
-    assert not list(output.glob("*game*.json"))
+    assert len(list(output.glob("*game*.json"))) == 1
     text = capsys.readouterr().out
-    assert "слева сверху" in text and "низкая уверенность" in text
+    assert "слева сверху" in text and "ни одного символа" in text
     assert str(sample) in text
 
 
@@ -168,8 +170,8 @@ def test_inconsistent_score_limits_are_reported_for_both_teams():
     ]
 
 
-def test_repeated_names_report_both_positions_and_best_attempt():
-    first = read_fields(names=["", "", "Third", "Fourth"])
+def test_repeated_names_warn_on_suffixed_position_and_best_attempt():
+    first = read_fields(names=["", "", "Th", "Fourth"])
     second = read_fields(names=["You", "Same", "Same", "Fourth"])
     second.time = 25
     for a in second.ocr_attempts:
@@ -179,23 +181,32 @@ def test_repeated_names_report_both_positions_and_best_attempt():
     for a in last.ocr_attempts:
         a["time"] = 30
     entries = RecognitionDiagnostics().build(
-        [last, second, first], [dict(start=20, end=100)], 1, NameRecognitionError("names")
+        [last, second, first],
+        [dict(start=20, end=100)],
+        1,
+        resolved=PlayerNameResolver().resolve([last, second, first], [dict(start=20, end=100)]),
     )
     assert [(e["seat"], e["reason"], e["time"]) for e in entries] == [
-        (2, "duplicate_name", 25),
-        (3, "duplicate_name", 25),
+        (3, "duplicate_name", 30),
     ]
 
 
 @pytest.mark.parametrize(
     "error,field,count",
     [
-        (NameRecognitionError("names"), "name", 4),
+        (None, "name", 4),
         (ScoreRecognitionError(1), "score", 2),
     ],
 )
 def test_missing_attempt_has_no_fabricated_image_or_timestamp(error, field, count):
-    entries = RecognitionDiagnostics().build([observation()], [dict(start=1, end=19)], 1, error)
+    group = [dict(start=1, end=19)]
+    entries = RecognitionDiagnostics().build(
+        [observation()],
+        group,
+        1,
+        error,
+        PlayerNameResolver().resolve([observation()], group) if field == "name" else None,
+    )
     assert len(entries) == count
     assert all(
         e["field"] == field
@@ -223,7 +234,10 @@ def test_name_interval_excludes_unrelated_attempts():
     outside = read_fields(names=["You", "Same", "Same", "Fourth"])
     outside.time = 5
     entries = RecognitionDiagnostics().build(
-        [outside], [dict(start=20, end=100)], 1, NameRecognitionError("names")
+        [outside],
+        [dict(start=20, end=100)],
+        1,
+        resolved=PlayerNameResolver().resolve([outside], [dict(start=20, end=100)]),
     )
     assert all(e["reason"] == "no_frame" for e in entries)
 
@@ -316,10 +330,10 @@ def test_sample_failure_keeps_original_error_and_continues(
     assert len(reports) == 2
     for report in reports:
         game = report["games"][0]
-        assert "четыре различных имени" in game["errors"][0]["message"]
+        assert "Не удалось приложить образец OCR" in game["errors"][0]["message"]
         (entry,) = game["recognition_diagnostics"]
         assert entry["sample"] is None and entry["sample_error"]
-        assert entry["reason"] == "low_confidence"
+        assert entry["reason"] == "generated_name"
     assert "образец отсутствует" in capsys.readouterr().out
     assert not list(output.rglob(".domino-*.tmp"))
 
@@ -385,6 +399,13 @@ class ControlledOCRAdapter:
     def read(self, crop):
         return OCRResult((OCRLine("unreadable", 0.725),))
 
+    def read_name(self, crop):
+        from domino_video.name_ocr import NameReading, NameSymbol
+
+        return NameReading(
+            (OCRLine("A?", 0.6),), (NameSymbol("A", 0.75, 0, 10), NameSymbol("?", 0.2, 10, 20))
+        )
+
     def probe(self):
         pass
 
@@ -395,6 +416,9 @@ class ControlledOCRAdapter:
 class ControlledScreenRecognizer(ScreenRecognizer):
     def _read(self, crop):
         return ControlledOCRAdapter().read(crop)
+
+    def _read_name(self, crop):
+        return ControlledOCRAdapter().read_name(crop)
 
 
 def initialize_controlled_worker():
@@ -447,7 +471,10 @@ def test_diagnostics_and_samples_match_through_real_process_boundaries(
     expected = [ControlledScreenRecognizer().observe(image, t, True) for t in [20, 25]]
     assert actual == expected
     entries = RecognitionDiagnostics().build(
-        actual, [dict(start=20, end=100)], 1, NameRecognitionError("names")
+        actual,
+        [dict(start=20, end=100)],
+        1,
+        resolved=PlayerNameResolver().resolve(actual, [dict(start=20, end=100)]),
     )
     source = tmp_path / "fixture.mp4"
     source.write_bytes(b"fixture")
@@ -456,6 +483,8 @@ def test_diagnostics_and_samples_match_through_real_process_boundaries(
         source, hashlib.sha256(b"fixture").hexdigest(), tmp_path, entries
     )
     assert len(entries) == 7 and reader.calls == [20]
+    assert all(e["threshold"] == (0.7 if e["field"] == "name" else 0.8) for e in entries)
+    assert entries[0]["final_name"] == "A*"
     from domino_video.screen_profile import ScreenProfile
 
     for entry in entries:

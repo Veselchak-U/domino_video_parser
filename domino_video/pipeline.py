@@ -5,6 +5,7 @@ import signal
 import sys
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from contextlib import closing
+from multiprocessing.util import Finalize
 
 import cv2
 
@@ -43,6 +44,7 @@ def _initialize_worker():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     cv2.setNumThreads(1)
     _recognizer = ScreenRecognizer()
+    Finalize(_recognizer, _recognizer.close, exitpriority=10)
 
 
 def _observe_frame(image, timestamp, read_text):
@@ -72,8 +74,12 @@ class ObservationPipeline:
         with closing(frames):
             if self.workers == 1 and not gpu.enabled:
                 recognizer = self._recognizer or ScreenRecognizer()
-                for image, timestamp, read_text in self._jobs(frames):
-                    yield recognizer.observe(image, timestamp, read_text)
+                try:
+                    for image, timestamp, read_text in self._jobs(frames):
+                        yield recognizer.observe(image, timestamp, read_text)
+                finally:
+                    if hasattr(recognizer, "close"):
+                        recognizer.close()
                 return
             pending = {}
             ready = {}
@@ -134,6 +140,8 @@ class ObservationPipeline:
                         yield ready.pop(emitted)
                         emitted += 1
             finally:
+                if hasattr(recognizer, "close"):
+                    recognizer.close()
                 for future in pending:
                     future.cancel()
                 if executor is not None:

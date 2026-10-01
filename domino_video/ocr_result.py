@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 OCR_THRESHOLD = 0.8
+NAME_OCR_THRESHOLD = 0.7
 
 
 @dataclass(frozen=True)

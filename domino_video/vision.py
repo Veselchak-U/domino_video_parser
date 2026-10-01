@@ -7,7 +7,8 @@ from dataclasses import asdict, dataclass, field
 import cv2
 import numpy as np
 
-from .ocr_result import OCR_THRESHOLD, OCRResult
+from .name_ocr import NameOCR, NameReading
+from .ocr_result import NAME_OCR_THRESHOLD, OCR_THRESHOLD, OCRResult
 from .screen_profile import ScreenProfile
 
 
@@ -46,13 +47,15 @@ class PreparedObservation:
     observation: Observation
     crops: dict[str, list[np.ndarray]]
 
-    def finish(self, read):
+    def finish(self, read, read_name=None):
         result = self.observation
         result.ocr_attempts = []
 
         def text(crop, field, seat=None, team=None):
-            reading = read(crop)
-            accepted = reading.text.strip() if field != "score" else reading.text
+            reading = (read_name or read)(crop) if field == "name" else read(crop)
+            accepted = reading.text
+            if field != "score" and not isinstance(reading, NameReading):
+                accepted = accepted.strip()
             attempt = dict(
                 field=field,
                 seat=seat,
@@ -60,12 +63,15 @@ class PreparedObservation:
                 time=result.time,
                 raw_rows=[asdict(row) for row in reading.rows],
                 accepted_text=accepted,
-                threshold=OCR_THRESHOLD,
+                threshold=NAME_OCR_THRESHOLD if field == "name" else OCR_THRESHOLD,
                 reason=reading.reason,
                 region=ScreenProfile().region(field, seat, team),
                 scale=1 if field == "name" else 3,
             )
             result.ocr_attempts.append(attempt)
+            if isinstance(reading, NameReading):
+                attempt["symbols"] = [asdict(s) for s in reading.symbols]
+                attempt["alternatives"] = list(reading.alternatives)
             return accepted, attempt
 
         if "names" in self.crops:
@@ -111,6 +117,7 @@ class PreparedObservation:
 class ScreenRecognizer:
     def __init__(self):
         self._ocr = None
+        self._name_ocr = None
 
     def normalize(self, image):
         candidates = []
@@ -128,7 +135,7 @@ class ScreenRecognizer:
         return max(candidates, key=lambda pair: pair[0])[1]
 
     def observe(self, image, time, read_text=False):
-        return self.prepare(image, time, read_text).finish(self._read)
+        return self.prepare(image, time, read_text).finish(self._read, self._read_name)
 
     def prepare(self, image, time, read_text=False):
         im = self.normalize(image)
@@ -211,3 +218,17 @@ class ScreenRecognizer:
             self._ocr = RapidOCR(intra_op_num_threads=1, inter_op_num_threads=1)
         rows, _ = self._ocr(crop)
         return OCRResult.from_rows(rows)
+
+    def _read_name(self, crop):
+        if self._ocr is None:
+            from rapidocr_onnxruntime import RapidOCR
+
+            self._ocr = RapidOCR(intra_op_num_threads=1, inter_op_num_threads=1)
+        if self._name_ocr is None:
+            self._name_ocr = NameOCR(self._ocr)
+        return self._name_ocr.read(crop)
+
+    def close(self):
+        if self._name_ocr is not None:
+            self._name_ocr.close()
+        self._name_ocr = self._ocr = None

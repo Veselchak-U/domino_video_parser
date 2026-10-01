@@ -19,7 +19,7 @@ domino-video-parser = "domino_video.cli:main"
 include = ["domino_video*"]
 
 [tool.setuptools.package-data]
-domino_video = ["*.json"]
+domino_video = ["*.json", "models/*.onnx", "models/*.txt", "models/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
