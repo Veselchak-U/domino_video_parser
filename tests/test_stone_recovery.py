@@ -16,6 +16,59 @@ def row(t, stones=(), hand=(), **kwargs):
     return Observation(t, list(stones), [list(hand), [], [], []], 0, False, True, **kwargs)
 
 
+def test_repeated_short_tile_on_old_footprint_requests_native_reading():
+    rows = [row(t, [tile("1-1")]) for t in [1, 1.5, 2]]
+    rows += [row(t, [tile("1-6")]) for t in [2.5, 3]]
+    rnd = GameReconstructor().extract(rows)[0]
+    assert [e["candidates"] for e in rnd["unresolved"]] == [["1-6"]]
+
+
+def test_native_reading_uses_continuous_settled_track_after_flight_gap():
+    from domino_video.stone_recovery import StoneRecovery
+
+    event = dict(
+        time=2,
+        interval=[1.5, 2],
+        candidates=["1-6"],
+        stone=None,
+        seat=0,
+        seats=[0],
+        action=None,
+        region=[870, 280, 50, 100],
+        reason="short_observation",
+    )
+    rnd = dict(
+        start=1,
+        end=4,
+        events=[dict(time=1, stone="1-1")],
+        remaining=[[], [], [], []],
+        unresolved=[event],
+        stone_recovery=[],
+    )
+    rows = [row(t, [tile("1-1"), tile("1-6", 870)]) for t in [1.6, 1.62, 1.64, 2, 2.02, 2.04]]
+    StoneRecovery().integrate([rnd], rows)
+    assert [e["stone"] for e in rnd["events"]] == ["1-1", "1-6"]
+    assert rnd["stone_recovery"][0]["evidence"]["times"] == [2, 2.02, 2.04]
+
+
+def test_duplicate_pip_reading_preserves_placement_time_after_chain_moves():
+    rows = [row(t, [tile("2-4", 1000), tile("2-2", 900)]) for t in [1, 1.5, 2]]
+    rows += [row(t, [tile("2-4", 1000), tile("2-2", 900), tile("2-4", 830)]) for t in [3, 3.5]]
+    rows += [row(t, [tile("2-4", 900), tile("2-2", 800), tile("2-6", 730)]) for t in [4, 4.5, 5]]
+    rnd = GameReconstructor().extract(rows)[0]
+    event = next(e for e in rnd["events"] if e["stone"] == "2-6")
+    assert event["time"] == 3
+
+
+def test_ambiguous_mover_uses_repeated_counters_without_global_indicator_conflict():
+    reconstructor = GameReconstructor()
+    deck = [f"{a}-{b}" for a in range(7) for b in range(a, 7) if (a, b) != (1, 1)]
+    event = dict(time=1, stone="1-1", seats=[0, 1], seat=0, action="start")
+    rnd = dict(end=5, remaining=[deck[:6], deck[6:13], deck[13:20], deck[20:]], events=[event])
+    rnd["counters"] = [dict(time=event["time"] + dt, counts=(6, 0, 7, 7)) for dt in [0.4, 0.5]]
+    assert reconstructor._round_options(rnd, rnd["events"], ["A", "B", "C", "D"], 1) == []
+
+
 def test_recovers_hidden_move_from_stable_hand_difference():
     first = tile("1-1")
     rows = [
@@ -62,6 +115,69 @@ def test_late_reading_fills_original_slot_after_chain_moves():
     assert rnd["events"][1]["time"] == 2
     assert rnd["stone_recovery"][0]["method"] == "late_reading"
     assert rnd["stone_recovery"][0]["time"] == 4
+
+
+@pytest.mark.parametrize("scale,shift", [(1, 0), (0.7, -100)])
+def test_occlusion_of_played_tile_does_not_create_missing_move(scale, shift):
+    first, second = tile("1-1"), tile("1-6", 870)
+    rows = [row(t, [first, second]) for t in [1, 1.25, 1.5]]
+    unknown = StoneObservation((None, None), second.box)
+    rows += [row(t, [first], uncertain_board=[unknown]) for t in [2, 2.25, 2.5]]
+    moved = [
+        StoneObservation(
+            s.values, (int(s.box[0] * scale) + shift, 280, int(50 * scale), int(100 * scale))
+        )
+        for s in [first, second]
+    ]
+    rows += [row(t, moved) for t in [3, 3.25, 3.5]]
+    rnd = GameReconstructor().extract(rows)[0]
+    assert [e["stone"] for e in rnd["events"]] == ["1-1", "1-6"]
+    assert rnd["unresolved"] == []
+    assert rnd["stone_recovery"] == []
+
+
+@pytest.mark.parametrize("reading_count,ambiguous", [(1, False), (3, True)])
+def test_old_tile_occlusion_keeps_insufficient_or_ambiguous_evidence(reading_count, ambiguous):
+    from domino_video.stone_recovery import StoneRecovery
+
+    first = tile("1-1")
+    second = tile("1-6", 870)
+    unknown = StoneObservation((None, None), second.box)
+    rows = [row(t, [first], uncertain_board=[unknown]) for t in [2, 2.25]]
+    visible = [first, second]
+    if ambiguous:
+        visible.append(tile("1-2", 880))
+    rows += [row(3 + i / 4, visible) for i in range(reading_count)]
+    rnd = dict(
+        start=1,
+        end=4,
+        events=[dict(time=1, stone=s.stone, seat=0, seats=[0], action=None) for s in visible],
+    )
+    StoneRecovery().augment([rnd], rows)
+    assert len(rnd["unresolved"]) == 1
+
+
+def test_old_layout_does_not_make_reopened_tile_ambiguous():
+    from domino_video.stone_recovery import StoneRecovery
+
+    first = tile("1-1")
+    second = tile("1-6", 870)
+    old = tile("1-2", 870)
+    unknown = StoneObservation((None, None), second.box)
+    rows = [row(t, [first, old]) for t in [1, 1.25, 1.5]]
+    rows += [row(t, [first, second]) for t in [3, 3.25, 3.5]]
+    rows += [row(t, [first], uncertain_board=[unknown]) for t in [4, 4.25]]
+    rows += [row(t, [first, second]) for t in [5, 5.25, 5.5]]
+    rnd = dict(
+        start=1,
+        end=6,
+        events=[
+            dict(time=t, stone=s.stone, seat=0, seats=[0], action=None)
+            for t, s in [(1, first), (1, old), (3, second)]
+        ],
+    )
+    StoneRecovery().augment([rnd], rows)
+    assert rnd["unresolved"] == []
 
 
 def test_short_last_tile_is_retained_for_additional_reading():
@@ -231,6 +347,20 @@ def load_recording_rows(path):
                     StoneObservation(tuple(s["values"]), tuple(s["box"])) for s in value[field]
                 ]
     return [Observation(**value) for value in rows]
+
+
+def test_two_fps_recording_preserves_all_deals_moves_and_results(sample_game):
+    reconstructor = GameReconstructor()
+    rounds = reconstructor.extract(
+        load_recording_rows("tests/fixtures/two_fps_observations.json.gz")
+    )
+    reconstructor.integrate_recovery(
+        rounds, load_recording_rows("tests/fixtures/two_fps_motion_observations.json.gz")
+    )
+    players = [p for team in sample_game["teams"] for p in team["players"]]
+    names = [p["name"] for p in sorted(players, key=lambda p: p["seat"])]
+    actual = reconstructor.build(rounds, names, "withoutEggs", 50)
+    assert actual == sample_game
 
 
 def test_current_recording_recovers_complete_unique_game_from_native_motion_frames():

@@ -16,6 +16,8 @@ class ResolvedNames:
 class PlayerNameResolver:
     def resolve(self, observations, group):
         start, end = group[0]["start"] - 10, group[-1]["end"] or float("inf")
+        if "names_end" in group[-1]:
+            start, end = group[-1]["end"], group[-1]["names_end"]
         choices = []
         for seat in range(1, 5):
             candidates = []

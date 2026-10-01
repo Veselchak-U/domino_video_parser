@@ -83,7 +83,7 @@ class VideoReader:
                 raise ValueError("Невозможно определить длительность видео")
             return VideoTimeline(first, last - first)
 
-    def frames(self, path: Path, sample_rate=4):
+    def frames(self, path: Path, sample_rate=2):
         """Decode sequentially; presentation timestamps also support variable FPS."""
         with av.open(str(path)) as container:
             if not container.streams.video:

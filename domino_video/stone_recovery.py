@@ -1,6 +1,7 @@
 """Evidence for missed moves; no video I/O or publication of files."""
 
 import math
+from collections import Counter
 from copy import deepcopy
 
 
@@ -142,13 +143,50 @@ class StoneRecovery:
                     event["seats"] = [0, 1, 2, 3]
 
     def _anchors(self, obs, tile):
-        return sorted(obs.board, key=lambda s: math.dist(tile.center, s.center))[:2]
+        return sorted(
+            (s for s in obs.board if tile.stone is None or s.stone != tile.stone),
+            key=lambda s: math.dist(tile.center, s.center),
+        )[:2]
+
+    def _played_slot(self, slot, events, rows):
+        if slot.get("ambiguous"):
+            return False
+        prior = [e for e in events if e["time"] < slot["interval"][0]]
+        played = {e["stone"] for e in prior}
+        layout_start = max((e["time"] for e in prior), default=slot["time"])
+        hits = {}
+        for obs in rows:
+            # Older placements can rearrange bends in the chain, so their
+            # geometry cannot identify a contour in the current layout.
+            if obs.time < layout_start or slot["time"] <= obs.time <= slot["last"]:
+                continue
+            visible = {s.stone: s for s in obs.board}
+            for stone in played & visible.keys():
+                tile = visible[stone]
+                compatible = []
+                for old in slot["anchors"]:
+                    anchor = visible.get(old.stone)
+                    if anchor is None:
+                        continue
+                    scale = max(anchor.box[2:]) / max(old.box[2:])
+                    predicted = tuple(
+                        anchor.center[i] + (slot["tile"].center[i] - old.center[i]) * scale
+                        for i in range(2)
+                    )
+                    compatible.append(math.dist(predicted, tile.center) < min(tile.box[2:]) * 0.6)
+                if compatible and all(compatible):
+                    hits.setdefault(stone, set()).add(obs.time)
+        # A footprint alone cannot dismiss a missed placement: require one
+        # previously played tile supported by repeated anchor-relative readings.
+        return len([stone for stone, times in hits.items() if len(times) >= 3]) == 1
 
     def _late(self, rnd, rows):
         slots = []
         previous_time = rnd["start"]
         for obs in rows:
-            for tile in obs.uncertain_board:
+            counts = Counter(s.stone for s in obs.board)
+            duplicated = [s for s in obs.board if counts[s.stone] > 1]
+            for tile in obs.uncertain_board + duplicated:
                 anchors = self._anchors(obs, tile)
                 if not anchors:
                     continue
@@ -183,6 +221,7 @@ class StoneRecovery:
                         )
                     )
             previous_time = obs.time
+        slots = [slot for slot in slots if not self._played_slot(slot, rnd["events"], rows)]
         used = set()
         known = {e["stone"] for e in rnd["events"]}
         # A newly visible tile may overlap an old screen footprint after the
@@ -304,7 +343,7 @@ class StoneRecovery:
             # Ignore isolated miscounts on the footprint of an established tile.
             first, tile = hits[0]
             earlier = [o for o in rows if first.time - 0.6 <= o.time < first.time]
-            if any(
+            if len(hits) == 1 and any(
                 s.stone in used and math.dist(s.center, tile.center) < min(tile.box[2:]) * 0.7
                 for o in earlier
                 for s in o.board
@@ -379,6 +418,17 @@ class StoneRecovery:
                             hits.setdefault(tile.stone, []).append((obs.time, tile))
                 valid = []
                 for stone, track in hits.items():
+                    # Flight may briefly hide the dots. Require a continuous
+                    # final track; disconnected earlier sightings add no proof.
+                    split = max(
+                        (
+                            i + 1
+                            for i, (a, b) in enumerate(zip(track, track[1:]))
+                            if b[0] - a[0] > 0.15
+                        ),
+                        default=0,
+                    )
+                    track = track[split:]
                     if len(track) < 3 or len({t for t, _ in track}) < 3:
                         continue
                     gaps = [b[0] - a[0] for a, b in zip(track, track[1:])]

@@ -9,6 +9,7 @@ import numpy as np
 
 from .name_ocr import NameOCR, NameReading
 from .ocr_result import NAME_OCR_THRESHOLD, OCR_THRESHOLD, OCRResult
+from .recognition_plan import OCRFields
 from .screen_profile import ScreenProfile
 
 
@@ -46,6 +47,8 @@ class Observation:
     hand_regions_valid: tuple[bool, ...] | None = None
     reveal_valid: tuple[bool, ...] | None = None
     dense: bool = False
+    result_table: bool = False
+    selective: bool = False
 
 
 @dataclass
@@ -71,7 +74,11 @@ class PreparedObservation:
                 accepted_text=accepted,
                 threshold=NAME_OCR_THRESHOLD if field == "name" else OCR_THRESHOLD,
                 reason=reading.reason,
-                region=ScreenProfile().region(field, seat, team),
+                region=(
+                    ScreenProfile.result_names[seat - 1]
+                    if field == "name" and result.result_table
+                    else ScreenProfile().region(field, seat, team)
+                ),
                 scale=1 if field == "name" else 3,
             )
             result.ocr_attempts.append(attempt)
@@ -90,6 +97,7 @@ class PreparedObservation:
                 if value and duplicates[value] > 1:
                     attempt["reason"] = "duplicate_name"
             result.names = names if all(names) and len(set(names)) == 4 else None
+        if "counts" in self.crops:
             own_count = len(result.hands[0])
             counts = [own_count if own_count <= 7 else None]
             for i, crop in enumerate(self.crops["counts"]):
@@ -137,18 +145,23 @@ class ScreenRecognizer:
             blue = cv2.inRange(
                 hsv[230:425, 1490:1590], np.array([85, 140, 100]), np.array([115, 255, 255])
             )
-            candidates.append((cv2.countNonZero(blue), im))
+            score = cv2.countNonZero(blue)
+            if ScreenProfile().result_table(hsv):
+                score += 100000
+            candidates.append((score, im))
         return max(candidates, key=lambda pair: pair[0])[1]
 
-    def observe(self, image, time, read_text=False):
+    def observe(self, image, time, read_text: bool | OCRFields = False):
         return self.prepare(image, time, read_text).finish(self._read, self._read_name)
 
-    def prepare(self, image, time, read_text=False, read_motion=False):
+    def prepare(self, image, time, read_text: bool | OCRFields = False, read_motion=False):
         im = self.normalize(image)
         hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
+        profile = ScreenProfile()
+        result_table = profile.result_table(hsv)
         table = hsv[150:550, 200:1450]
         green = cv2.inRange(table, np.array([35, 100, 20]), np.array([100, 255, 255]))
-        supported = cv2.countNonZero(green) > 150000
+        supported = cv2.countNonZero(green) > 150000 and not result_table
         level = float(np.median(table[:, :, 2][green > 0])) if supported else 0
         reveal = supported and level < 80
         tiles = self._stones(im, hsv, read_motion)
@@ -181,6 +194,8 @@ class ScreenRecognizer:
             )
         active = int(np.argmax(intensity)) if max(intensity) > 500 and not reveal else None
         result = Observation(time, board, hands, active, reveal, supported)
+        result.result_table = result_table
+        result.selective = isinstance(read_text, OCRFields)
         result.uncertain_board = uncertain_board
         result.hand_regions_valid = (supported and not reveal, False, False, False)
         if reveal:
@@ -196,11 +211,17 @@ class ScreenRecognizer:
                 ]
             )
         crops = {}
-        profile = ScreenProfile()
-        if read_text and supported and not reveal:
+        fields = read_text if isinstance(read_text, OCRFields) else None
+        names = fields.names if fields else bool(read_text)
+        counts = fields.counts if fields else bool(read_text)
+        scores = fields.scores if fields else bool(read_text) or (not board and not reveal)
+        if names and result_table:
+            crops["names"] = [im[y:y2, x:x2].copy() for x, y, x2, y2 in profile.result_names]
+        elif names and fields is None and supported and not reveal:
             crops["names"] = [profile.crop(im, "name", seat=i) for i in range(1, 5)]
+        if counts and supported and not reveal:
             crops["counts"] = [profile.crop(im, "count", seat=i) for i in range(2, 5)]
-        if supported and (read_text or (not board and not reveal)):
+        if scores and supported:
             crops["scores"] = [profile.crop(im, "score", team=team) for team in "AB"]
         return PreparedObservation(result, crops)
 

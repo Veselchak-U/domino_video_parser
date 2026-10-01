@@ -348,7 +348,7 @@ class GameReconstructor:
                             new_ends[side] = outer
                         new_played = deepcopy(played)
                         new_played[seat].append(event["stone"])
-                        if raw.get("indicator_unreliable"):
+                        if raw.get("indicator_unreliable") or len(set(event.get("seats", []))) > 1:
                             stop = (
                                 events[index + 1]["time"] if index + 1 < len(events) else raw["end"]
                             )

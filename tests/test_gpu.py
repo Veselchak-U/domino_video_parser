@@ -253,6 +253,7 @@ def test_prepared_crops_preserve_observations(name, read_text, expected):
 
 def test_gpu_failure_does_not_break_next_source(tmp_path, monkeypatch, observations):
     import json
+    from copy import deepcopy
 
     from domino_video.corrections import Corrections
     from domino_video.manager import ParseManager
@@ -287,10 +288,18 @@ def test_gpu_failure_does_not_break_next_source(tmp_path, monkeypatch, observati
             return self.observation
 
     class Recognizer:
+        def observe(self, image, time, read_text):
+            visual = deepcopy(image)
+            visual.selective = True
+            return visual
+
         def prepare(self, image, time, read_text):
             return Prepared(image)
 
     class Reader:
+        def frame_at(self, path, time):
+            return next(o for o in observations if o.time == time)
+
         def timeline(self, path, scanning=None):
             return VideoTimeline(0, 291)
 

@@ -10,6 +10,7 @@ from multiprocessing.util import Finalize
 import cv2
 
 from .ocr import DeviceOCR
+from .recognition_plan import OCRFields
 from .vision import ScreenRecognizer
 
 
@@ -56,12 +57,21 @@ def _prepare_frame(image, timestamp, read_text):
 
 
 class ObservationPipeline:
-    def __init__(self, workers=1, recognizer=None, device="cpu", message=None, gpu_workers="auto"):
+    def __init__(
+        self,
+        workers=1,
+        recognizer=None,
+        device="cpu",
+        message=None,
+        gpu_workers="auto",
+        fields: dict[float, OCRFields] | None = None,
+    ):
         self.workers = workers
         self._recognizer = recognizer
         self._device = device
         self._message = message
         self._gpu_workers = gpu_workers
+        self._fields = fields
 
     def observe(self, frames):
         with closing(frames), DeviceOCR(self._device, self._gpu_workers) as gpu:
@@ -153,4 +163,6 @@ class ObservationPipeline:
             read_text = timestamp - last_text >= 5
             if read_text:
                 last_text = timestamp
+            if self._fields is not None:
+                read_text = self._fields.get(timestamp, OCRFields())
             yield image, timestamp, read_text

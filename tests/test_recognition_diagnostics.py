@@ -421,6 +421,55 @@ class ControlledScreenRecognizer(ScreenRecognizer):
         return ControlledOCRAdapter().read_name(crop)
 
 
+@pytest.mark.parametrize("mode", ["cpu", "gpu"])
+@pytest.mark.parametrize("workers", [1, 2])
+def test_selective_fields_cross_process_boundaries(monkeypatch, mode, workers):
+    from concurrent.futures import ProcessPoolExecutor
+
+    from domino_video import pipeline
+    from domino_video.gpu_worker import GPUWorker
+    from domino_video.ocr import DeviceOCR
+    from domino_video.recognition_plan import OCRFields
+
+    def executor(**kwargs):
+        kwargs["initializer"] = initialize_controlled_worker
+        return ProcessPoolExecutor(**kwargs)
+
+    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", executor)
+    if mode == "gpu":
+        monkeypatch.setattr(
+            pipeline,
+            "DeviceOCR",
+            lambda mode, setting: DeviceOCR(
+                mode,
+                "1",
+                available=lambda: True,
+                worker_factory=lambda: GPUWorker(ControlledOCRAdapter),
+            ),
+        )
+    image = cv2.imread("tests/fixtures/frame_20.png")
+    table = cv2.imread("tests/fixtures/frame_results.png")
+
+    def frames():
+        yield 20, image
+        yield 21, image
+        yield 22, image
+        yield 287, table
+
+    fields = {20: OCRFields(counts=True), 21: OCRFields(scores=True), 287: OCRFields(names=True)}
+    actual = list(
+        pipeline.ObservationPipeline(
+            workers, ControlledScreenRecognizer(), device=mode, fields=fields
+        ).observe(frames())
+    )
+    assert [[a["field"] for a in o.ocr_attempts] for o in actual] == [
+        ["count"] * 3,
+        ["score"] * 2,
+        [],
+        ["name"] * 4,
+    ]
+
+
 def initialize_controlled_worker():
     from domino_video import pipeline
 

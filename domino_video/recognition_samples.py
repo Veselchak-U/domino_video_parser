@@ -43,7 +43,11 @@ class RecognitionSamples:
                     images.clear()
                     image = self._reader.frame_at(source, timestamp)
                     images[timestamp] = self._recognizer.normalize(image)
-                crop = self._profile.crop(images[timestamp], *key)
+                if entry["field"] == "name" and entry.get("region"):
+                    x, y, x2, y2 = entry["region"]
+                    crop = images[timestamp][y:y2, x:x2].copy()
+                else:
+                    crop = self._profile.crop(images[timestamp], *key)
                 path = self._storage.write_sample(report_dir, crop)
                 samples[key] = (dict(path=path, time=timestamp), None)
             except Exception as error:

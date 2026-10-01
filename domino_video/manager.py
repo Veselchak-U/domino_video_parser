@@ -6,6 +6,7 @@ from .pipeline import ObservationPipeline
 from .player_names import PlayerNameResolver
 from .progress import ConsoleProgress
 from .recognition_diagnostics import RecognitionDiagnostics
+from .recognition_plan import recognition_requests
 from .recognition_samples import RecognitionSamples
 from .reconstruct import GameReconstructor, ReconstructionError, ScoreRecognitionError
 from .recording_time import RecordingTimeResolver
@@ -85,11 +86,22 @@ class ParseManager:
                                 observed.dense = True
                                 extra.append(observed)
                         self._reconstructor.integrate_recovery(rounds, extra)
+                    if any(o.selective for o in observations):
+                        self._read_fields(
+                            path, rounds, observations, workers, progress, device, gpu_workers
+                        )
                     if not rounds:
                         raise ReconstructionError(
                             "Не найдена партия поддерживаемого визуального профиля"
                         )
                     groups = self._groups(rounds, observations, limit)
+                    if any(o.selective for o in observations):
+                        for n, group in enumerate(groups):
+                            group[-1]["names_end"] = (
+                                groups[n + 1][0]["start"]
+                                if n + 1 < len(groups)
+                                else max(o.time for o in observations) + 0.001
+                            )
                     corrections.check_games(hashes[path], len(groups))
                     for game_number, group in enumerate(groups, 1):
                         record = dict(number=game_number, rounds=group, errors=[])
@@ -241,15 +253,16 @@ class ParseManager:
         )
 
         def ready(message):
-            progress.message(message)
+            progress.message("Анализ камней: 2 кадра/сек")
             progress.ready()
 
         pipeline = ObservationPipeline(
             workers,
             recognizer=self._recognizer,
-            device=device,
+            device="cpu",
             message=ready,
             gpu_workers=gpu_workers,
+            fields={},
         )
         result = []
         with closing(pipeline.observe(self._reader.frames(path))) as observations:
@@ -259,6 +272,38 @@ class ParseManager:
                 progress.update(processed / timeline.duration * 100, processed_seconds=processed)
         progress.update(99, processed_seconds=timeline.duration)
         return result
+
+    def _read_fields(self, path, rounds, observations, workers, progress, device, gpu_workers):
+        requests = recognition_requests(rounds, observations)
+        if not requests:
+            return
+        progress.message(f"Адресное чтение текста: {len(requests)} кадров")
+
+        def frames():
+            for timestamp in sorted(requests):
+                yield timestamp, self._reader.frame_at(path, timestamp)
+
+        pipeline = ObservationPipeline(
+            workers,
+            recognizer=self._recognizer,
+            device=device,
+            message=progress.message,
+            gpu_workers=gpu_workers,
+            fields=requests,
+        )
+        by_time = {o.time: o for o in observations}
+        with closing(pipeline.observe(frames())) as rows:
+            for obs in rows:
+                original = by_time[obs.time]
+                original.ocr_attempts = obs.ocr_attempts
+                original.names, original.scores, original.limit = obs.names, obs.scores, obs.limit
+                original.counts = obs.counts
+        for rnd in rounds:
+            rnd["counters"] = [
+                dict(time=o.time, counts=o.counts)
+                for o in observations
+                if rnd["start"] <= o.time < (rnd["end"] or float("inf")) and o.counts is not None
+            ]
 
     def _groups(self, rounds, observations, limit):
         groups = []
