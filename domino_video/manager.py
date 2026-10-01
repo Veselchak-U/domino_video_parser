@@ -211,7 +211,26 @@ class ParseManager:
                 except OSError as error:
                     failures = True
                     progress.message(f"Не удалось сохранить отчёт: {error}")
-                progress.finish(report_saved and report["status"] == "ok")
+                success = report_saved and report["status"] == "ok"
+                if success:
+                    progress.update(99, "перенос видео")
+                    try:
+                        ready_dir = (
+                            path.parent
+                            if path.parent.name.casefold() == "ready"
+                            else path.parent / "ready"
+                        )
+                        ready_path = self._storage.move_video(path, ready_dir)
+                        progress.message(f"Видео готово: {ready_path}")
+                    except KeyboardInterrupt:
+                        progress.message("Обработка прервана")
+                        progress.finish(False)
+                        return 1
+                    except OSError as error:
+                        failures = True
+                        success = False
+                        progress.message(f"Не удалось переместить видео {path.name}: {error}")
+                progress.finish(success)
                 for target in saved_paths:
                     progress.message(f"Сохранено: {target}")
         return int(failures)

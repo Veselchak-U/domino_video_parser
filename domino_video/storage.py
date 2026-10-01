@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -21,6 +22,33 @@ def read_json(text):
 
 
 class ExportStorage:
+    def move_video(self, source: Path, ready_dir: Path):
+        if source.resolve().parent == ready_dir.resolve():
+            return source
+        ready_dir.mkdir(parents=True, exist_ok=True)
+        target = ready_dir / source.name
+        number = 0
+        while True:
+            try:
+                destination = target.open("xb")
+                break
+            except (FileExistsError, IsADirectoryError, PermissionError):
+                if not os.path.lexists(target):
+                    raise
+                number += 1
+                target = ready_dir / f"{source.stem}-{number:03d}{source.suffix}"
+        try:
+            with destination:
+                with source.open("rb") as stream:
+                    shutil.copyfileobj(stream, destination, length=1024 * 1024)
+                destination.flush()
+                os.fsync(destination.fileno())
+            source.unlink()
+        except (Exception, KeyboardInterrupt):
+            target.unlink(missing_ok=True)
+            raise
+        return target
+
     def write_sample(self, report_dir: Path, image):
         ok, encoded = cv2.imencode(".png", image)
         if not ok:

@@ -29,6 +29,7 @@ def test_repeated_game_export_preserves_or_replaces_result(
     output = tmp_path / "out"
     manager = ParseManager(Reader(), Recognizer())
     assert manager.run([source], output, "withoutEggs", 50, Corrections()) == 0
+    (source.parent / "ready" / source.name).rename(source)
     target = next(output.glob("*game*.json"))
     target.write_text('{"previous": true}', encoding="utf-8")
     previous = target.read_bytes()
