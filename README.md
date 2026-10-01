@@ -371,6 +371,25 @@ PNG содержит именно участок выбранного кадра
 
 ## Проверки и происхождение контракта
 
+Для структурного поиска кода подключён
+[AST Index](https://github.com/defendend/Claude-ast-index-search), версия 3.55.0.
+Это отдельный инструмент разработки; для запуска парсера он не требуется.
+Установка через Node.js/npm из корня проекта на Windows:
+
+```powershell
+npm.cmd ci --prefix tools/ast-index --cache .analysis/npm-cache
+.\ast-index.cmd rebuild
+.\ast-index.cmd class ParseManager
+.\ast-index.cmd outline domino_video/manager.py
+.\ast-index.cmd update
+```
+
+Обёртка всегда работает с корнем этого checkout и кешем
+`.analysis/ast-index-cache/`. После группы правок или смены ветки обновляйте
+индекс через update. Конфигурация — [.ast-index.yaml](.ast-index.yaml),
+подробные правила поиска — [TOOL_USAGE_RULES.md](.agents/rules/TOOL_USAGE_RULES.md).
+Индекс и установленные npm-пакеты в Git не включаются.
+
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 openspec validate --all --strict

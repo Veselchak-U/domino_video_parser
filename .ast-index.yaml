@@ -1,0 +1,17 @@
+# AST Index: index source and tests, not videos, models or installed tools.
+include:
+  - domino_video
+  - tests
+  - tools
+exclude:
+  - domino_video/models
+  - tests/fixtures
+  - tools/ast-index
+  - .venv
+  - .venv-gpu
+  - .analysis
+  - in
+  - out
+  - build
+  - dist
+no_ignore: false

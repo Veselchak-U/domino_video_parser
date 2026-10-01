@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "dependencies": {
+    "@ast-index/cli": "3.55.0"
+  }
+}
