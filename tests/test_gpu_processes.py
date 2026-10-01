@@ -16,6 +16,8 @@ class EchoAdapter:
             time.sleep(60)
         return os.getpid(), value
 
+    read = text
+
     def close(self):
         pass
 

@@ -46,3 +46,27 @@ def test_rejects_unusable_pts_range(monkeypatch, times):
     with pytest.raises(ValueError):
         VideoReader().timeline("video.mp4")
     assert container.closed
+
+
+@pytest.mark.parametrize("timestamp,found", [(10.333333, True), (10.4, False), (20, False)])
+def test_frame_at_requires_exact_pts_and_closes_decoder(monkeypatch, timestamp, found):
+    class Frame:
+        def __init__(self, time):
+            self.time = time
+
+        def to_ndarray(self, format):
+            assert format == "bgr24"
+            return "exact image"
+
+    container = Container(times=(10, 10.333333, 10.666667))
+    seek_calls = []
+    container.seek = lambda offset, **kwargs: seek_calls.append((offset, kwargs))
+    container.decode = lambda **kwargs: (Frame(t) for t in container.times)
+    monkeypatch.setattr("domino_video.video.av.open", lambda path: container)
+    if found:
+        assert VideoReader().frame_at("video.mp4", timestamp) == "exact image"
+    else:
+        with pytest.raises(ValueError, match="кадр"):
+            VideoReader().frame_at("video.mp4", timestamp)
+    assert seek_calls == [(int(timestamp * 1000000), dict(backward=True))]
+    assert container.closed

@@ -12,6 +12,21 @@ class VideoTimeline:
 
 
 class VideoReader:
+    def frame_at(self, path, timestamp):
+        with av.open(str(path)) as container:
+            if not container.streams.video:
+                raise ValueError("В файле нет видеопотока")
+            container.streams.video[0].thread_count = 1
+            container.seek(int(timestamp * av.time_base), backward=True)
+            for frame in container.decode(video=0):
+                if frame.time is None:
+                    continue
+                if abs(float(frame.time) - timestamp) < 1e-6:
+                    return frame.to_ndarray(format="bgr24")
+                if float(frame.time) > timestamp + 1e-6:
+                    break
+        raise ValueError(f"Исходный кадр {timestamp:.6f} сек не найден")
+
     def timeline(self, path, scanning=None):
         with av.open(str(path)) as container:
             if not container.streams.video:

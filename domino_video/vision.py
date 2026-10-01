@@ -1,10 +1,14 @@
 """Визуальный профиль записи: координаты нормализованы к 1608×720."""
 
 import re
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import asdict, dataclass, field
 
 import cv2
 import numpy as np
+
+from .ocr_result import OCR_THRESHOLD, OCRResult
+from .screen_profile import ScreenProfile
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,7 @@ class Observation:
     scores: tuple[int, int] | None = None
     limit: int | None = None
     counts: tuple[int | None, ...] | None = None
+    ocr_attempts: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -41,27 +46,65 @@ class PreparedObservation:
     observation: Observation
     crops: dict[str, list[np.ndarray]]
 
-    def finish(self, text):
+    def finish(self, read):
         result = self.observation
+        result.ocr_attempts = []
+
+        def text(crop, field, seat=None, team=None):
+            reading = read(crop)
+            accepted = reading.text.strip() if field != "score" else reading.text
+            attempt = dict(
+                field=field,
+                seat=seat,
+                team=team,
+                time=result.time,
+                raw_rows=[asdict(row) for row in reading.rows],
+                accepted_text=accepted,
+                threshold=OCR_THRESHOLD,
+                reason=reading.reason,
+                region=ScreenProfile().region(field, seat, team),
+                scale=1 if field == "name" else 3,
+            )
+            result.ocr_attempts.append(attempt)
+            return accepted, attempt
+
         if "names" in self.crops:
-            names = [text(crop).strip() for crop in self.crops["names"]]
+            readings = [
+                text(crop, "name", seat=i + 1) for i, crop in enumerate(self.crops["names"])
+            ]
+            names = [value for value, _ in readings]
+            duplicates = Counter(names)
+            for value, attempt in readings:
+                if value and duplicates[value] > 1:
+                    attempt["reason"] = "duplicate_name"
             result.names = names if all(names) and len(set(names)) == 4 else None
             own_count = len(result.hands[0])
             counts = [own_count if own_count <= 7 else None]
-            for crop in self.crops["counts"]:
-                match = re.fullmatch(r"[0-7]", text(crop).strip())
+            for i, crop in enumerate(self.crops["counts"]):
+                value, attempt = text(crop, "count", seat=i + 2)
+                match = re.fullmatch(r"[0-7]", value)
+                if not match and attempt["reason"] is None:
+                    attempt["reason"] = "invalid_format"
                 counts.append(int(match[0]) if match else None)
             result.counts = tuple(counts)
         if "scores" in self.crops:
             values = []
-            for crop in self.crops["scores"]:
-                match = re.search(r"(\d+)\s*/\s*(50|101)", text(crop))
+            for i, crop in enumerate(self.crops["scores"]):
+                value, attempt = text(crop, "score", team="AB"[i])
+                match = re.search(r"(\d+)\s*/\s*(50|101)", value)
                 if not match:
-                    break
-                values.append(tuple(map(int, match.groups())))
-            if len(values) == 2 and values[0][1] == values[1][1]:
+                    if attempt["reason"] is None:
+                        attempt["reason"] = "invalid_format"
+                    values.append(None)
+                else:
+                    values.append(tuple(map(int, match.groups())))
+            if len(values) == 2 and all(values) and values[0][1] == values[1][1]:
                 result.scores = (values[0][0], values[1][0])
                 result.limit = values[0][1]
+            elif len(values) == 2 and all(values):
+                for attempt in result.ocr_attempts:
+                    if attempt["field"] == "score":
+                        attempt["reason"] = "invalid_format"
         return result
 
 
@@ -85,7 +128,7 @@ class ScreenRecognizer:
         return max(candidates, key=lambda pair: pair[0])[1]
 
     def observe(self, image, time, read_text=False):
-        return self.prepare(image, time, read_text).finish(self._text)
+        return self.prepare(image, time, read_text).finish(self._read)
 
     def prepare(self, image, time, read_text=False):
         im = self.normalize(image)
@@ -121,29 +164,12 @@ class ScreenRecognizer:
         active = int(np.argmax(intensity)) if max(intensity) > 500 and not reveal else None
         result = Observation(time, board, hands, active, reveal, supported)
         crops = {}
+        profile = ScreenProfile()
         if read_text and supported and not reveal:
-            crops["names"] = [
-                im[y:y2, x:x2].copy()
-                for x, y, x2, y2 in [
-                    (100, 620, 250, 665),
-                    (230, 42, 410, 94),
-                    (765, 42, 958, 94),
-                    (1285, 42, 1500, 94),
-                ]
-            ]
-            crops["counts"] = [
-                cv2.resize(im[y:y2, x:x2], None, fx=3, fy=3)
-                for x, y, x2, y2 in [
-                    (180, 99, 237, 162),
-                    (712, 99, 770, 164),
-                    (1245, 99, 1299, 164),
-                ]
-            ]
+            crops["names"] = [profile.crop(im, "name", seat=i) for i in range(1, 5)]
+            crops["counts"] = [profile.crop(im, "count", seat=i) for i in range(2, 5)]
         if supported and (read_text or (not board and not reveal)):
-            crops["scores"] = [
-                cv2.resize(im[y:y2, x:x2], None, fx=3, fy=3)
-                for x, y, x2, y2 in [(740, 88, 902, 135), (230, 88, 383, 135)]
-            ]
+            crops["scores"] = [profile.crop(im, "score", team=team) for team in "AB"]
         return PreparedObservation(result, crops)
 
     def _stones(self, im, hsv):
@@ -176,9 +202,12 @@ class ScreenRecognizer:
         return found
 
     def _text(self, crop):
+        return self._read(crop).text
+
+    def _read(self, crop):
         if self._ocr is None:
             from rapidocr_onnxruntime import RapidOCR
 
             self._ocr = RapidOCR(intra_op_num_threads=1, inter_op_num_threads=1)
         rows, _ = self._ocr(crop)
-        return " ".join(row[1] for row in (rows or []) if row[2] > 0.8)
+        return OCRResult.from_rows(rows)

@@ -5,7 +5,9 @@ from dataclasses import asdict
 
 from .pipeline import ObservationPipeline
 from .progress import ConsoleProgress
-from .reconstruct import GameReconstructor, ReconstructionError
+from .recognition_diagnostics import RecognitionDiagnostics
+from .recognition_samples import RecognitionSamples
+from .reconstruct import GameReconstructor, ReconstructionError, ScoreRecognitionError
 from .recording_time import RecordingTimeResolver
 from .storage import ExportStorage
 from .validator import GameValidator
@@ -19,6 +21,8 @@ class ParseManager:
         self._recognizer = recognizer or ScreenRecognizer()
         self._reconstructor = GameReconstructor()
         self._storage = ExportStorage()
+        self._diagnostics = RecognitionDiagnostics()
+        self._samples = RecognitionSamples(self._reader, self._storage)
         self._time_resolver = time_resolver or RecordingTimeResolver()
 
     def run(
@@ -78,6 +82,7 @@ class ParseManager:
                     for game_number, group in enumerate(groups, 1):
                         record = dict(number=game_number, rounds=group, errors=[])
                         report["games"].append(record)
+                        game_error = None
                         try:
                             changed, teams = corrections.apply(hashes[path], game_number, group)
                             names = self._names(observations, group)
@@ -100,11 +105,29 @@ class ParseManager:
                             record["output"] = str(target.resolve())
                             saved_paths.append(target)
                         except (ValueError, OSError, KeyError, TypeError, IndexError) as error:
+                            game_error = error
                             failures = True
                             record["errors"].append(
                                 dict(time=group[0]["start"], message=str(error))
                             )
                             progress.message(f"Партия {game_number}: {error}")
+                        entries = self._diagnostics.build(
+                            observations, group, game_number, game_error
+                        )
+                        record["recognition_diagnostics"] = entries
+                        sample_failed = self._samples.write(
+                            path, hashes[path], output / "report", entries
+                        )
+                        if sample_failed:
+                            failures = True
+                            record["errors"].append(
+                                dict(
+                                    time=None,
+                                    message="Не удалось приложить образец OCR; подробности в recognition_diagnostics",
+                                )
+                            )
+                        for entry in entries:
+                            progress.message(self._diagnostics.message(entry, output / "report"))
                     report["status"] = (
                         "needs_review" if any(g["errors"] for g in report["games"]) else "ok"
                     )
@@ -207,7 +230,7 @@ class ParseManager:
             stop = group[i + 1]["start"] if i + 1 < len(group) else raw["end"] + 16
             observed = [o for o in observations if raw["end"] < o.time < stop and o.scores]
             if not observed:
-                raise ReconstructionError(f"Кон {i + 1}: не прочитан итоговый счёт")
+                raise ScoreRecognitionError(i + 1)
             # The new score appears after the reveal animation. Prefer a final score
             # over a following reset to 0:0 when another match starts immediately.
             terminal = [o for o in observed if max(o.scores) >= limit]

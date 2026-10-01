@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .gpu_memory import probe_memory
 from .gpu_worker import GPUWorker
+from .ocr_result import OCRResult
 
 
 class DirectMLAdapter:
@@ -65,8 +66,11 @@ class DirectMLAdapter:
             session.run(None, {session.get_inputs()[0].name: np.ones(shape, dtype=np.float32)})
 
     def text(self, crop):
+        return self.read(crop).text
+
+    def read(self, crop):
         rows, _ = self._engine(crop)
-        return " ".join(row[1] for row in (rows or []) if row[2] > 0.8)
+        return OCRResult.from_rows(rows)
 
     def close(self):
         for session in self._sessions:

@@ -11,6 +11,16 @@ class ReconstructionError(ValueError):
     pass
 
 
+class NameRecognitionError(ReconstructionError):
+    pass
+
+
+class ScoreRecognitionError(ReconstructionError):
+    def __init__(self, round_number):
+        super().__init__(f"Кон {round_number}: не прочитан итоговый счёт")
+        self.round_number = round_number
+
+
 class GameReconstructor:
     def extract(self, observations):
         rounds = []
@@ -161,7 +171,7 @@ class GameReconstructor:
 
     def build(self, rounds, names, variant, limit):
         if names is None or len(set(names)) != 4 or not all(names):
-            raise ReconstructionError("Не удалось прочитать четыре различных имени")
+            raise NameRecognitionError("Не удалось прочитать четыре различных имени")
         teams = [
             dict(id="A", name="Team A", players=[dict(name=names[i], seat=i + 1) for i in [0, 2]]),
             dict(id="B", name="Team B", players=[dict(name=names[i], seat=i + 1) for i in [1, 3]]),

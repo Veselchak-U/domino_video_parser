@@ -21,7 +21,7 @@ def _serve(connection, factory):
             if command is None:
                 return
             kind, value = command
-            result = adapter.probe() if kind == "probe" else value.finish(adapter.text)
+            result = adapter.probe() if kind == "probe" else value.finish(adapter.read)
             connection.send((True, result))
     except BaseException as error:
         try:

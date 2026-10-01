@@ -15,7 +15,7 @@ class ThreadWorker:
             raise
 
     def submit(self, prepared):
-        return self.executor.submit(prepared.finish, self.adapter.text)
+        return self.executor.submit(prepared.finish, self.adapter.read)
 
     def probe(self):
         pass
@@ -165,6 +165,8 @@ def test_gpu_pipeline_order_bounds_owner_and_cleanup(monkeypatch, workers, failu
             completed.append(number)
             return number
 
+        read = text
+
         def close(self):
             assert threading.get_ident() == owner[0]
             closed.append("gpu")
@@ -232,6 +234,7 @@ def test_prepared_crops_preserve_observations(name, read_text, expected):
     import cv2
     import numpy as np
 
+    from domino_video.ocr_result import OCRLine, OCRResult
     from domino_video.vision import ScreenRecognizer
 
     image = cv2.imread(f"tests/fixtures/frame_{name}.png")
@@ -241,8 +244,9 @@ def test_prepared_crops_preserve_observations(name, read_text, expected):
     for group in prepared.crops.values():
         for crop in group:
             assert not np.shares_memory(crop, image)
-    actual = prepared.finish(lambda crop: "0/50")
-    recognizer._text = lambda crop: "0/50"
+    reading = OCRResult((OCRLine("0/50", 0.99),))
+    actual = prepared.finish(lambda crop: reading)
+    recognizer._read = lambda crop: reading
     assert actual == recognizer.observe(image, float(name), read_text)
 
 
@@ -265,6 +269,8 @@ def test_gpu_failure_does_not_break_next_source(tmp_path, monkeypatch, observati
         def text(self, crop):
             if self.number == 0:
                 raise RuntimeError("GPU memory exhausted")
+
+        read = text
 
         def close(self):
             self.closed = True
@@ -322,13 +328,14 @@ def test_gpu_failure_does_not_break_next_source(tmp_path, monkeypatch, observati
 def test_unscheduled_empty_table_still_reads_scores(monkeypatch):
     import cv2
 
+    from domino_video.ocr_result import OCRLine, OCRResult
     from domino_video.vision import ScreenRecognizer
 
     recognizer = ScreenRecognizer()
     monkeypatch.setattr(recognizer, "_stones", lambda *args: [])
     prepared = recognizer.prepare(cv2.imread("tests/fixtures/frame_20.png"), 1, False)
     assert set(prepared.crops) == {"scores"}
-    result = prepared.finish(lambda crop: "7/50")
+    result = prepared.finish(lambda crop: OCRResult((OCRLine("7/50", 0.99),)))
     assert result.scores == (7, 7) and result.limit == 50
 
 
