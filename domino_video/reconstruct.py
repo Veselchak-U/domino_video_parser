@@ -4,6 +4,7 @@ import math
 from collections import Counter
 from copy import deepcopy
 
+from .stone_recovery import StoneRecovery
 from .validator import GameValidator, InvalidGame
 
 
@@ -131,7 +132,13 @@ class GameReconstructor:
             if reveal_rows:
                 self._finish(current, reveal_rows, history)
             rounds.append(current)
-        return rounds
+        return StoneRecovery().augment(rounds, observations)
+
+    def recovery_windows(self, rounds):
+        return StoneRecovery().windows(rounds)
+
+    def integrate_recovery(self, rounds, observations):
+        StoneRecovery().integrate(rounds, observations)
 
     def _side(self, events, tile, visible):
         if not events:
@@ -157,6 +164,8 @@ class GameReconstructor:
 
     def _finish(self, current, rows, history):
         remaining = []
+        confirmed = []
+        last_active = next((seat for t, seat in reversed(history) if t <= current["end"]), None)
         for seat in range(4):
             options = Counter(tuple(sorted(row.hands[seat])) for row in rows if row.hands[seat])
             # Require a repeated stable reveal; prefer the full hand over animation fragments.
@@ -164,7 +173,20 @@ class GameReconstructor:
             remaining.append(
                 list(max(valid, key=lambda hand: (len(hand), options[hand]))) if valid else []
             )
+            valid_area = sum(
+                row.reveal_valid is not None and row.reveal_valid[seat] for row in rows
+            )
+            empty = sum(not row.hands[seat] for row in rows) >= 2
+            confirmed.append(
+                bool(valid)
+                or (
+                    empty
+                    and last_active == seat
+                    and (valid_area >= 2 or all(row.reveal_valid is None for row in rows))
+                )
+            )
         current["remaining"] = remaining
+        current["remaining_confirmed"] = confirmed
         current["last_active"] = next(
             (seat for t, seat in reversed(history) if t <= current["end"]), None
         )
@@ -186,17 +208,23 @@ class GameReconstructor:
             used = [event["stone"] for event in events] + [
                 s for hand in raw["remaining"] for s in hand
             ]
+            used = [stone for stone in used if stone is not None]
             missing = {f"{a}-{b}" for a in range(7) for b in range(a, 7)} - set(used)
             if len(used) != len(set(used)):
                 raise ReconstructionError(f"Кон {number}: повтор камня в наблюдениях")
-            if len(missing) == 1:
-                # Some clients remove the board before a last move has a stable frame.
-                # Only one missing stone and a known last actor can be recovered.
-                events.append(
-                    dict(time=raw["end"], seat=raw["last_active"], action=None, stone=missing.pop())
-                )
-            elif missing:
-                raise ReconstructionError(f"Кон {number}: не распознаны камни {sorted(missing)}")
+            if missing:
+                if not all(raw.get("remaining_confirmed", [False] * 4)):
+                    raise ReconstructionError(f"Кон {number}: не подтверждены конечные остатки")
+                if not StoneRecovery().exclusion(raw, events, sorted(missing)):
+                    raise ReconstructionError(
+                        f"Кон {number}: не распознаны камни {sorted(missing)}"
+                    )
+            if any(e["stone"] is None for e in events) or raw.get("issues"):
+                raise ReconstructionError(f"Кон {number}: противоречивые или неизвестные события")
+            for index, event in enumerate(events, 1):
+                for entry in raw.get("stone_recovery", []):
+                    if entry["stone"] == event["stone"]:
+                        entry["event_id"] = index
             options = self._round_options(raw, events, names, number)
             if len(candidates) * len(options) > 128:
                 raise ReconstructionError(f"Кон {number}: слишком много сочетаний реконструкций")
@@ -217,6 +245,18 @@ class GameReconstructor:
             raise ReconstructionError(
                 errors[0] if not valid and errors else "Несколько допустимых реконструкций"
             )
+        for raw, rnd in zip(rounds, valid[0]["rounds"]):
+            for entry in raw.get("stone_recovery", []):
+                entry["status"] = "rules_validated"
+                matching = [
+                    m
+                    for m in rnd["moves"]
+                    if m.get("stone")
+                    and "-".join(map(str, sorted(map(int, m["stone"].split("-")))))
+                    == entry["stone"]
+                ]
+                if matching:
+                    entry["seat"] = names.index(matching[0]["player"]) + 1
         return valid[0]
 
     def _round_options(self, raw, events, names, number):
@@ -260,6 +300,40 @@ class GameReconstructor:
                         else ([event["action"]] if event["action"] else ["left", "right"])
                     )
                     for action in actions:
+                        positions = event.get("positions", {})
+                        chain = []
+                        for move in moves:
+                            if move["action"] == "start" or move["action"] == "right":
+                                chain.append(
+                                    "-".join(map(str, sorted(map(int, move["stone"].split("-")))))
+                                )
+                            elif move["action"] == "left":
+                                chain.insert(
+                                    0,
+                                    "-".join(map(str, sorted(map(int, move["stone"].split("-"))))),
+                                )
+                        if (
+                            not event["action"]
+                            and action != "start"
+                            and len(chain) > 1
+                            and all(s in positions for s in [chain[0], chain[-1], event["stone"]])
+                        ):
+                            left_distance = math.dist(
+                                positions[event["stone"]], positions[chain[0]]
+                            )
+                            right_distance = math.dist(
+                                positions[event["stone"]], positions[chain[-1]]
+                            )
+                            if (
+                                min(left_distance, right_distance)
+                                < event.get("tile_size", 100) * 1.75
+                                and abs(left_distance - right_distance) > 20
+                            ):
+                                observed_side = (
+                                    "left" if left_distance < right_distance else "right"
+                                )
+                                if action != observed_side:
+                                    continue
                         new_ends = list(ends) if ends else [a, b]
                         move_stone = oriented
                         if action != "start":
@@ -274,6 +348,28 @@ class GameReconstructor:
                             new_ends[side] = outer
                         new_played = deepcopy(played)
                         new_played[seat].append(event["stone"])
+                        if raw.get("indicator_unreliable"):
+                            stop = (
+                                events[index + 1]["time"] if index + 1 < len(events) else raw["end"]
+                            )
+                            counters = [
+                                o
+                                for o in raw.get("counters", [])
+                                if event["time"] + 0.3 < o["time"] < stop - 0.3
+                            ]
+                            readings = [
+                                Counter(
+                                    o["counts"][p] for o in counters if o["counts"][p] is not None
+                                )
+                                for p in range(4)
+                            ]
+                            if any(
+                                count >= 2 and value != 7 - len(new_played[p])
+                                for p, reading in enumerate(readings)
+                                if p != 0
+                                for value, count in reading.items()
+                            ):
+                                continue
                         expanded.append(
                             (
                                 next_moves

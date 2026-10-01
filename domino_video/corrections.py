@@ -104,6 +104,7 @@ class Corrections:
                             raise ValueError("Ход отсутствует в исправленной руке")
                         rest.remove(event["stone"])
                 rnd["remaining"][int(seat)] = rest
+                rnd.setdefault("remaining_confirmed", [False] * 4)[int(seat)] = True
                 if seat == "0":
                     rnd["initial_hand"] = list(hand)
         return result, game.get("teams")

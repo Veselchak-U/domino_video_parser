@@ -1,6 +1,33 @@
 import pytest
 
 
+def test_corrected_deal_confirms_only_the_corrected_remaining_hand():
+    from domino_video.corrections import Corrections
+
+    hand = [f"0-{value}" for value in range(7)]
+    raw = [
+        {
+            "events": [],
+            "remaining": [[], [], [], []],
+            "remaining_confirmed": [False, False, False, False],
+        }
+    ]
+    document = {
+        "sources": [
+            {
+                "sha256": "abc",
+                "games": [{"number": 1, "rounds": [{"number": 1, "deal": {"2": hand}}]}],
+            }
+        ]
+    }
+
+    corrected, _ = Corrections(document).apply("abc", 1, raw)
+
+    assert corrected[0]["remaining"][2] == hand
+    assert corrected[0]["remaining_confirmed"] == [False, False, True, False]
+    assert raw[0]["remaining_confirmed"] == [False] * 4
+
+
 def test_replaces_event_and_rejects_wrong_hash():
     from domino_video.corrections import Corrections
 

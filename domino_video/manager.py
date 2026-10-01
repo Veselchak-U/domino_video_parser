@@ -73,6 +73,18 @@ class ParseManager:
                     observations = self._observe(path, workers, progress, device, gpu_workers)
                     progress.update(99, "проверка и сохранение")
                     rounds = self._reconstructor.extract(observations)
+                    windows = self._reconstructor.recovery_windows(rounds)
+                    if windows and hasattr(self._reader, "interval_frames"):
+                        progress.message(f"Дополнительное чтение камней: {len(windows)} интервалов")
+                        extra = []
+                        with closing(self._reader.interval_frames(path, windows)) as frames:
+                            for timestamp, image in frames:
+                                observed = self._recognizer.prepare(
+                                    image, timestamp, False, read_motion=True
+                                ).observation
+                                observed.dense = True
+                                extra.append(observed)
+                        self._reconstructor.integrate_recovery(rounds, extra)
                     if not rounds:
                         raise ReconstructionError(
                             "Не найдена партия поддерживаемого визуального профиля"
@@ -84,8 +96,10 @@ class ParseManager:
                         report["games"].append(record)
                         game_error = None
                         resolved = None
+                        diagnostic_group = group
                         try:
                             changed, teams = corrections.apply(hashes[path], game_number, group)
+                            diagnostic_group = changed
                             resolved = PlayerNameResolver().resolve(observations, group)
                             names = resolved.names
                             if teams:
@@ -103,6 +117,9 @@ class ParseManager:
                                 game = self._rename_teams(game, teams)
                             self._check_scores(game, group, observations, limit)
                             GameValidator().validate(game)
+                            for rnd in changed:
+                                for entry in rnd.get("stone_recovery", []):
+                                    entry["status"] = "validated"
                             target = output / f"{prefix}-game-{game_number:03d}.json"
                             self._storage.write(target, game, replace=True)
                             record["output"] = str(target.resolve())
@@ -118,10 +135,30 @@ class ParseManager:
                             observations, group, game_number, game_error, resolved
                         )
                         record["recognition_diagnostics"] = entries
+                        stone_entries = []
+                        for round_number, rnd in enumerate(diagnostic_group, 1):
+                            for entry in rnd.get("stone_recovery", []):
+                                entry.update(game=game_number, round=round_number)
+                                stone_entries.append(entry)
+                            for event in rnd.get("unresolved", []):
+                                if event.get("stone") is None:
+                                    stone_entries.append(
+                                        dict(
+                                            event,
+                                            game=game_number,
+                                            round=round_number,
+                                            method=None,
+                                            sample=None,
+                                        )
+                                    )
+                        record["stone_recovery"] = stone_entries
+                        stone_sample_failed = self._samples.write_stones(
+                            path, hashes[path], output / "report", stone_entries
+                        )
                         sample_failed = self._samples.write(
                             path, hashes[path], output / "report", entries
                         )
-                        if sample_failed:
+                        if sample_failed or stone_sample_failed:
                             failures = True
                             record["errors"].append(
                                 dict(

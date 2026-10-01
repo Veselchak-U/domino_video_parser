@@ -56,3 +56,43 @@ class RecognitionSamples:
                 if sample_error:
                     entry["sample_error"] = sample_error
         return failed
+
+    def write_stones(self, source, expected_hash, report_dir, entries):
+        chosen = [
+            e
+            for e in entries
+            if e.get("method") in {"animation", "late_reading", "hand_difference"}
+            and e.get("time") is not None
+            and e.get("region")
+        ]
+        if not chosen:
+            return False
+        error = None
+        try:
+            with source.open("rb") as stream:
+                if hashlib.file_digest(stream, "sha256").hexdigest() != expected_hash:
+                    raise ValueError("Исходное видео изменилось после распознавания")
+        except (OSError, ValueError) as failure:
+            error = str(failure)
+        failed = False
+        timestamp, image = None, None
+        for entry in sorted(chosen, key=lambda e: e["time"]):
+            try:
+                if error:
+                    raise ValueError(error)
+                if timestamp != entry["time"]:
+                    timestamp = entry["time"]
+                    image = self._recognizer.normalize(self._reader.frame_at(source, timestamp))
+                x, y, w, h = entry["region"]
+                crop = image[
+                    max(0, y) : min(image.shape[0], y + h), max(0, x) : min(image.shape[1], x + w)
+                ]
+                if not crop.size:
+                    raise ValueError("Пустой участок доказательства камня")
+                path = self._storage.write_sample(report_dir, crop)
+                entry["sample"] = dict(path=path, time=timestamp)
+            except Exception as failure:
+                failed = True
+                entry["sample"] = None
+                entry["sample_error"] = f"{type(failure).__name__}: {failure}"
+        return failed

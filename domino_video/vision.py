@@ -14,11 +14,13 @@ from .screen_profile import ScreenProfile
 
 @dataclass(frozen=True)
 class StoneObservation:
-    values: tuple[int, int]
+    values: tuple[int | None, int | None]
     box: tuple[int, int, int, int]
 
     @property
     def stone(self):
+        if None in self.values:
+            return None
         return "-".join(map(str, sorted(self.values)))
 
     @property
@@ -40,6 +42,10 @@ class Observation:
     limit: int | None = None
     counts: tuple[int | None, ...] | None = None
     ocr_attempts: list[dict] = field(default_factory=list)
+    uncertain_board: list[StoneObservation] = field(default_factory=list)
+    hand_regions_valid: tuple[bool, ...] | None = None
+    reveal_valid: tuple[bool, ...] | None = None
+    dense: bool = False
 
 
 @dataclass
@@ -137,7 +143,7 @@ class ScreenRecognizer:
     def observe(self, image, time, read_text=False):
         return self.prepare(image, time, read_text).finish(self._read, self._read_name)
 
-    def prepare(self, image, time, read_text=False):
+    def prepare(self, image, time, read_text=False, read_motion=False):
         im = self.normalize(image)
         hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
         table = hsv[150:550, 200:1450]
@@ -145,11 +151,16 @@ class ScreenRecognizer:
         supported = cv2.countNonZero(green) > 150000
         level = float(np.median(table[:, :, 2][green > 0])) if supported else 0
         reveal = supported and level < 80
-        tiles = self._stones(im, hsv)
+        tiles = self._stones(im, hsv, read_motion)
         board = []
+        uncertain_board = []
         hands = [[], [], [], []]
         for tile in tiles:
             x, y, w, h = tile.box
+            if tile.stone is None:
+                if not reveal and 140 < y < 550 and 180 < x < 1480:
+                    uncertain_board.append(tile)
+                continue
             if reveal:
                 if 45 < y < 150 and h > w and 100 < x < 1450:
                     seat = 1 if x < 500 else (2 if x < 1050 else 3)
@@ -170,6 +181,20 @@ class ScreenRecognizer:
             )
         active = int(np.argmax(intensity)) if max(intensity) > 500 and not reveal else None
         result = Observation(time, board, hands, active, reveal, supported)
+        result.uncertain_board = uncertain_board
+        result.hand_regions_valid = (supported and not reveal, False, False, False)
+        if reveal:
+            # Reveal settles progressively. A darkened, unobstructed area is
+            # necessary; zero detected tiles alone does not prove an empty hand.
+            result.reveal_valid = tuple(
+                supported and float(np.median(hsv[y1:y2, x1:x2, 2])) < 110
+                for x1, y1, x2, y2 in [
+                    (500, 385, 1150, 480),
+                    (100, 45, 500, 150),
+                    (500, 45, 1050, 150),
+                    (1050, 45, 1450, 150),
+                ]
+            )
         crops = {}
         profile = ScreenProfile()
         if read_text and supported and not reveal:
@@ -179,7 +204,7 @@ class ScreenRecognizer:
             crops["scores"] = [profile.crop(im, "score", team=team) for team in "AB"]
         return PreparedObservation(result, crops)
 
-    def _stones(self, im, hsv):
+    def _stones(self, im, hsv, read_motion=False):
         mask = cv2.inRange(hsv, np.array([12, 15, 195]), np.array([40, 230, 255]))
         mask[560:] = cv2.inRange(hsv[560:], np.array([12, 15, 75]), np.array([40, 230, 255]))
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -187,23 +212,54 @@ class ScreenRecognizer:
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
             if not (18 < min(w, h) < 85 and 1.65 < max(w, h) / min(w, h) < 2.3):
+                if not read_motion:
+                    continue
+                rect = cv2.minAreaRect(contour)
+                short, long = sorted(rect[1])
+                if not (18 < short < 85 and 1.65 < long / short < 2.3):
+                    continue
+                if cv2.contourArea(contour) / (short * long) < 0.85:
+                    continue
+                points = cv2.boxPoints(rect)
+                center = points.mean(axis=0)
+                points = points[
+                    np.argsort(np.arctan2(points[:, 1] - center[1], points[:, 0] - center[0]))
+                ]
+                points = np.roll(points, -int(np.argmin(points.sum(axis=1))), axis=0)
+                cw = int(np.linalg.norm(points[1] - points[0]))
+                ch = int(np.linalg.norm(points[2] - points[1]))
+                target = np.float32([[0, 0], [cw - 1, 0], [cw - 1, ch - 1], [0, ch - 1]])
+                crop = cv2.warpPerspective(
+                    im, cv2.getPerspectiveTransform(np.float32(points), target), (cw, ch)
+                )
+                crop = crop[3:-3, 3:-3]
+            elif cv2.contourArea(contour) / (w * h) < 0.85:
+                if cv2.contourArea(contour) / (w * h) >= 0.45:
+                    found.append(StoneObservation((None, None), (x, y, w, h)))
                 continue
-            if cv2.contourArea(contour) / (w * h) < 0.85:
+            else:
+                crop = im[y + 3 : y + h - 3, x + 3 : x + w - 3]
+            overlaps_avatar = any(
+                (max(x, min(ax, x + w)) - ax) ** 2 + (max(y, min(ay, y + h)) - ay) ** 2 < 45**2
+                for ax, ay in [(188, 538), (157, 80), (691, 80), (1224, 80)]
+            )
+            if overlaps_avatar and 140 < y < 550 and 180 < x < 1480:
+                found.append(StoneObservation((None, None), (x, y, w, h)))
                 continue
-            crop = im[y + 3 : y + h - 3, x + 3 : x + w - 3]
+            cw, ch = crop.shape[1] + 6, crop.shape[0] + 6
             gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
             dark = (gray < gray.max() * 0.52).astype("uint8") * 255
             _, _, stats, centers = cv2.connectedComponentsWithStats(dark)
             counts = [0, 0]
             for stat, center in zip(stats[1:], centers[1:]):
                 a, b, ww, hh, area = stat
-                if not max(3, min(w, h) ** 2 * 0.012) <= area <= min(w, h) ** 2 * 0.15:
+                if not max(3, min(cw, ch) ** 2 * 0.012) <= area <= min(cw, ch) ** 2 * 0.15:
                     continue
                 if not 0.5 <= ww / hh <= 2:
                     continue
                 if a == 0 or b == 0 or a + ww == crop.shape[1] or b + hh == crop.shape[0]:
                     continue
-                counts[int(center[0 if w > h else 1] > crop.shape[1 if w > h else 0] / 2)] += 1
+                counts[int(center[0 if cw > ch else 1] > crop.shape[1 if cw > ch else 0] / 2)] += 1
             if max(counts) <= 6:
                 found.append(StoneObservation(tuple(counts), (x, y, w, h)))
         return found

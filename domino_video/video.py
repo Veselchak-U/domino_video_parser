@@ -12,6 +12,32 @@ class VideoTimeline:
 
 
 class VideoReader:
+    def interval_frames(self, path, windows):
+        """Decode only merged native-PTS windows; release the container on close."""
+        merged = []
+        for start, stop in sorted(windows):
+            if stop <= start:
+                continue
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(stop, merged[-1][1]))
+            else:
+                merged.append((start, stop))
+        with av.open(str(path)) as container:
+            if not container.streams.video:
+                raise ValueError("В файле нет видеопотока")
+            container.streams.video[0].thread_count = 1
+            for start, stop in merged:
+                container.seek(int(start * av.time_base), backward=True)
+                for frame in container.decode(video=0):
+                    if frame.time is None:
+                        continue
+                    time = float(frame.time)
+                    if time < start:
+                        continue
+                    if time > stop:
+                        break
+                    yield time, frame.to_ndarray(format="bgr24")
+
     def frame_at(self, path, timestamp):
         with av.open(str(path)) as container:
             if not container.streams.video:
