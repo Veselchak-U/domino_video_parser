@@ -95,7 +95,8 @@ class ParseManager:
                         )
                     if not rounds:
                         raise ReconstructionError(
-                            "Не найдена партия поддерживаемого визуального профиля"
+                            "Не найдена партия поддерживаемого визуального профиля",
+                            code="no_supported_game",
                         )
                     groups = self._groups(rounds, observations, limit)
                     if any(o.selective for o in observations):
@@ -107,7 +108,10 @@ class ParseManager:
                             )
                     corrections.check_games(hashes[path], len(groups))
                     for game_number, group in enumerate(groups, 1):
-                        record = dict(number=game_number, rounds=group, errors=[])
+                        record = dict(
+                            number=game_number, rounds=group, errors=[],
+                            reconstruction_diagnostics=[],
+                        )
                         report["games"].append(record)
                         game_error = None
                         resolved = None
@@ -142,9 +146,14 @@ class ParseManager:
                         except (ValueError, OSError, KeyError, TypeError, IndexError) as error:
                             game_error = error
                             failures = True
-                            record["errors"].append(
-                                dict(time=group[0]["start"], message=str(error))
-                            )
+                            failure = dict(time=None, message=str(error))
+                            if isinstance(error, ReconstructionError):
+                                diagnostic = dict(error.diagnostic, game=game_number)
+                                record["reconstruction_diagnostics"].append(diagnostic)
+                                failure.update({key: diagnostic[key] for key in (
+                                    "code", "round", "event", "time"
+                                )})
+                            record["errors"].append(failure)
                             progress.message(f"Партия {game_number}: {error}")
                         entries = self._diagnostics.build(
                             observations, group, game_number, game_error, resolved
@@ -196,6 +205,11 @@ class ParseManager:
                     report["errors"].append(
                         dict(time=None, message=f"{type(error).__name__}: {error}")
                     )
+                    if isinstance(error, ReconstructionError):
+                        report.setdefault("reconstruction_diagnostics", []).append(error.diagnostic)
+                        report["errors"][-1].update(
+                            code=error.diagnostic["code"], time=error.diagnostic["time"]
+                        )
                     progress.message(f"Ошибка {path.name}: {error}")
                 report["corrections_template"] = {
                     "sources": [
@@ -341,12 +355,18 @@ class ParseManager:
             terminal = [o for o in observed if max(o.scores) >= limit]
             last = (terminal or observed)[-1]
             if last.limit != limit:
-                raise ReconstructionError("Лимит табло расходится с параметром запуска")
+                raise ReconstructionError(
+                    "Лимит табло расходится с параметром запуска",
+                    code="score_limit_conflict", round_number=i + 1, time=last.time,
+                    details=dict(expected=limit, observed=last.limit),
+                )
             team_names = [t["name"] for t in game["teams"]]
             expected = tuple(rnd["result"]["total_score"][t] for t in team_names)
             if expected != last.scores:
                 raise ReconstructionError(
-                    f"Кон {i + 1}: на табло {last.scores}, по правилам {expected}"
+                    f"Кон {i + 1}: на табло {last.scores}, по правилам {expected}",
+                    code="score_conflict", round_number=i + 1, time=last.time,
+                    details=dict(expected=expected, observed=last.scores),
                 )
 
     def _rename_teams(self, game, teams):

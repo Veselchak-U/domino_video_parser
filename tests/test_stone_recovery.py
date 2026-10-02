@@ -499,7 +499,7 @@ def test_exclusion_refuses_two_possible_slots(observations):
 
 def test_candidate_budget_rejects_more_than_128_games(observations, sample_game):
     class BranchingReconstructor(GameReconstructor):
-        def _round_options(self, raw, events, names, number):
+        def _round_options(self, raw, events, names, number, diagnostics=None):
             return [sample_game["rounds"][0]] * 129
 
     r = BranchingReconstructor()
