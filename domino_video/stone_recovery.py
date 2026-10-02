@@ -3,6 +3,7 @@
 import math
 from collections import Counter
 from copy import deepcopy
+from itertools import groupby
 
 
 class StoneRecovery:
@@ -377,6 +378,7 @@ class StoneRecovery:
         for rnd in rounds:
             if not rnd.get("complete"):
                 continue
+            windows.extend((start, stop) for start, stop, _ in self._coincident_groups(rnd))
             if rnd.get("remaining") is not None:
                 used = {e["stone"] for e in rnd["events"] if e["stone"] is not None}
                 used.update(s for hand in rnd["remaining"] for s in hand)
@@ -395,12 +397,103 @@ class StoneRecovery:
                 merged.append((start, stop))
         return merged
 
+    def _coincident_groups(self, rnd):
+        groups = []
+        previous = None
+        timed = [e for e in rnd["events"] if e.get("time") is not None]
+        for time, items in groupby(sorted(timed, key=lambda e: e["time"]), key=lambda e: e["time"]):
+            events = list(items)
+            if len(events) > 1 and previous is not None:
+                groups.append((previous, time, events))
+            previous = time
+        return groups
+
+    def _earlier_placements(self, rnd, rows):
+        for start, stop, events in self._coincident_groups(rnd):
+            for event in events:
+                tracks = []
+                for obs in rows:
+                    if not start <= obs.time < stop - 0.5:
+                        continue
+                    tiles = [s for s in obs.board if s.stone == event["stone"]]
+                    if len(tiles) != 1:
+                        continue
+                    if not tracks or not 0 < obs.time - tracks[-1][-1][0].time <= 0.15:
+                        tracks.append([])
+                    tracks[-1].append((obs, tiles[0]))
+                valid = []
+                for track in tracks:
+                    if len(track) < 3:
+                        continue
+                    first, tile = track[0]
+                    last, final = track[-1]
+                    positions = event.get("positions", {})
+                    if event["stone"] not in positions:
+                        continue
+                    known = {e["stone"] for e in rnd["events"] if e["time"] < first.time}
+                    linked = False
+                    for neighbor in last.board:
+                        if neighbor.stone not in known or neighbor.stone not in positions:
+                            continue
+                        if (
+                            math.dist(positions[event["stone"]], positions[neighbor.stone])
+                            >= event.get("tile_size", 100) * 1.75
+                        ):
+                            continue
+                        distances = []
+                        for obs, reading in track:
+                            anchors = [s for s in obs.board if s.stone == neighbor.stone]
+                            if len(anchors) != 1:
+                                break
+                            distances.append(math.dist(reading.center, anchors[0].center))
+                        if (
+                            len(distances) != len(track)
+                            or distances[-1] >= max(final.box[2:]) * 1.75
+                        ):
+                            continue
+                        settled = all(math.dist(tile.center, s.center) < 4 for _, s in track)
+                        incoming = distances[0] - distances[-1] > min(final.box[2:]) * 0.5 and all(
+                            b <= a + 4 for a, b in zip(distances, distances[1:])
+                        )
+                        if settled or incoming:
+                            linked = True
+                            break
+                    seats = sorted(
+                        {
+                            o.active
+                            for o in rows
+                            if first.time - 3.5 <= o.time <= first.time - 0.3
+                            and o.active is not None
+                        }
+                    )
+                    if rnd.get("indicator_unreliable"):
+                        seats = [0, 1, 2, 3]
+                    if linked and seats:
+                        valid.append((track, seats))
+                if len(valid) != 1:
+                    continue
+                track, seats = valid[0]
+                first, tile = track[0]
+                event.update(
+                    time=first.time,
+                    seats=seats,
+                    seat=seats[0] if len(seats) == 1 else None,
+                    action=None,
+                )
+                self._entry(
+                    rnd,
+                    event,
+                    "animation",
+                    [first.time, track[-1][0].time],
+                    first.time,
+                    tile.box,
+                    dict(times=[o.time for o, _ in track], late_reading=stop),
+                )
+
     def _terminal_slots(self, rnd, rows, accounted_for):
         hits = {}
         played = {e["stone"] for e in rnd["events"]}
         for obs in rows:
-            if obs.time < rnd["end"] - 1:
-                continue
             for tile in obs.board:
                 if tile.stone not in accounted_for:
                     hits.setdefault(tile.stone, []).append((obs, tile))
@@ -429,12 +522,18 @@ class StoneRecovery:
             if not settled:
                 continue
             obs, tile = settled[-1]
-            # Unknown values do not make unrelated old occlusions a match.
-            # Use the installed position, not the first position in flight.
+            # The final second may contain the continuation of an older short
+            # reading. Keep the continuous track back to its actual beginning.
+            # Unknown values alone still do not link unrelated occlusions.
             if any(
                 (not old["candidates"] or stone in old["candidates"])
-                and old["interval"][0] - 1 <= obs.time <= old["interval"][1] + 0.5
-                and self._fits_slot(old, tile, obs)
+                and any(
+                    old["interval"][0] - 1 <= reading.time <= old["interval"][1] + 0.5
+                    and 0 < reading.time - before.time <= 0.15
+                    and math.dist(previous.center, placed.center) < 4
+                    and self._fits_slot(old, placed, reading)
+                    for (before, previous), (reading, placed) in zip(track, track[1:])
+                )
                 for old in rnd.get("unresolved", [])
             ):
                 continue
@@ -476,6 +575,7 @@ class StoneRecovery:
                 for o in observations
                 if rnd["start"] <= o.time < rnd["end"] and not o.reveal and o.supported
             ]
+            self._earlier_placements(rnd, rows)
             if rnd.get("complete") and len(accounted_for) < 28:
                 self._terminal_slots(rnd, rows, accounted_for)
             for event in list(rnd.get("unresolved", [])):

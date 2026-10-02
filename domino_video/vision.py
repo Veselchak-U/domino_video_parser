@@ -168,6 +168,9 @@ class ScreenRecognizer:
         board = []
         uncertain_board = []
         hands = [[], [], [], []]
+        # Native recovery also follows incoming tiles above the table, before
+        # they disappear under the upper avatars. Coarse board sampling does not.
+        board_top = 75 if read_motion else 140
         for tile in tiles:
             x, y, w, h = tile.box
             if tile.stone is None:
@@ -182,7 +185,7 @@ class ScreenRecognizer:
                     hands[0].append(tile.stone)
             elif y > 560 and 450 < x < 1350:
                 hands[0].append(tile.stone)
-            elif 140 < y < 550 and 180 < x < 1480:
+            elif board_top < y < 550 and 180 < x < 1480:
                 board.append(tile)
         intensity = []
         for x, y in [(188, 538), (157, 80), (691, 80), (1224, 80)]:
