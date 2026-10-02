@@ -264,6 +264,9 @@ class ScreenRecognizer:
                 (max(x, min(ax, x + w)) - ax) ** 2 + (max(y, min(ay, y + h)) - ay) ** 2 < 45**2
                 for ax, ay in [(188, 538), (157, 80), (691, 80), (1224, 80)]
             )
+            # The lower avatar's flag protrudes beyond its circular portrait.
+            # Its top edge can hide a pip while leaving a rectangular tile contour.
+            overlaps_flag = x + 3 < 257 and x + w - 3 > 216 and y + 3 < 522 and y + h - 3 > 488
             if overlaps_avatar and 140 < y < 550 and 180 < x < 1480:
                 found.append(StoneObservation((None, None), (x, y, w, h)))
                 continue
@@ -272,6 +275,7 @@ class ScreenRecognizer:
             dark = (gray < gray.max() * 0.52).astype("uint8") * 255
             _, _, stats, centers = cv2.connectedComponentsWithStats(dark)
             counts = [0, 0]
+            pip_centers = [[], []]
             for stat, center in zip(stats[1:], centers[1:]):
                 a, b, ww, hh, area = stat
                 if not max(3, min(cw, ch) ** 2 * 0.012) <= area <= min(cw, ch) ** 2 * 0.15:
@@ -280,10 +284,58 @@ class ScreenRecognizer:
                     continue
                 if a == 0 or b == 0 or a + ww == crop.shape[1] or b + hh == crop.shape[0]:
                     continue
-                counts[int(center[0 if cw > ch else 1] > crop.shape[1 if cw > ch else 0] / 2)] += 1
+                half = int(center[0 if cw > ch else 1] > crop.shape[1 if cw > ch else 0] / 2)
+                counts[half] += 1
+                pip_centers[half].append((center[0] + x + 3, center[1] + y + 3))
             if max(counts) <= 6:
-                found.append(StoneObservation(tuple(counts), (x, y, w, h)))
+                values = tuple(counts)
+                if overlaps_flag and not self._flag_reading_complete((x, y, w, h), pip_centers):
+                    values = (None, None)
+                found.append(StoneObservation(values, (x, y, w, h)))
         return found
+
+    def _flag_reading_complete(self, box, centers):
+        # Templates only reject incomplete readings; never fill in hidden pips.
+        low, middle, high = 0.23, 0.5, 0.77
+        corners = [(a, b) for a in (low, high) for b in (low, high)]
+        diagonals = [[(low, low), (high, high)], [(low, high), (high, low)]]
+        patterns = [[], [(middle, middle)], *diagonals]
+        patterns += [points + [(middle, middle)] for points in diagonals]
+        patterns += [corners, corners + [(middle, middle)]]
+        patterns += [
+            [(a, b) for a in (low, high) for b in (low, middle, high)],
+            [(a, b) for a in (low, middle, high) for b in (low, high)],
+        ]
+        x, y, w, h = box
+        width, height = (w / 2, h) if w > h else (w, h / 2)
+        radius = min(width, height) * 0.12
+        tolerance = min(width, height) * 0.18
+        for half, observed in enumerate(centers):
+            left = x + (half * width if w > h else 0)
+            top = y + (half * height if h > w else 0)
+            possible = set()
+            for pattern in patterns:
+                points = [(left + a * width, top + b * height) for a, b in pattern]
+                unmatched = list(points)
+                for cx, cy in observed:
+                    nearest = min(
+                        unmatched, key=lambda p: (p[0] - cx) ** 2 + (p[1] - cy) ** 2, default=None
+                    )
+                    if (
+                        nearest is None
+                        or (nearest[0] - cx) ** 2 + (nearest[1] - cy) ** 2 > tolerance**2
+                    ):
+                        break
+                    unmatched.remove(nearest)
+                else:
+                    if all(
+                        216 - radius < px < 257 + radius and 488 - radius < py < 522 + radius
+                        for px, py in unmatched
+                    ):
+                        possible.add(len(points))
+            if possible != {len(observed)}:
+                return False
+        return True
 
     def _text(self, crop):
         return self._read(crop).text

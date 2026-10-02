@@ -395,6 +395,78 @@ class StoneRecovery:
                 merged.append((start, stop))
         return merged
 
+    def _terminal_slots(self, rnd, rows, accounted_for):
+        hits = {}
+        played = {e["stone"] for e in rnd["events"]}
+        for obs in rows:
+            if obs.time < rnd["end"] - 1:
+                continue
+            for tile in obs.board:
+                if tile.stone not in accounted_for:
+                    hits.setdefault(tile.stone, []).append((obs, tile))
+        for stone, track in hits.items():
+            # A disconnected sighting is not part of the final flight.
+            split = max(
+                (
+                    i + 1
+                    for i, (a, b) in enumerate(zip(track, track[1:]))
+                    if b[0].time - a[0].time > 0.15
+                ),
+                default=0,
+            )
+            track = track[split:]
+            settled = [
+                b
+                for a, b in zip(track, track[1:])
+                if b[0].time >= rnd["end"] - 0.5
+                and 0 < b[0].time - a[0].time <= 0.15
+                and math.dist(a[1].center, b[1].center) < 4
+                and any(
+                    s.stone in played and math.dist(s.center, b[1].center) < max(b[1].box[2:]) * 4
+                    for s in b[0].board
+                )
+            ]
+            if not settled:
+                continue
+            obs, tile = settled[-1]
+            # Unknown values do not make unrelated old occlusions a match.
+            # Use the installed position, not the first position in flight.
+            if any(
+                (not old["candidates"] or stone in old["candidates"])
+                and old["interval"][0] - 1 <= obs.time <= old["interval"][1] + 0.5
+                and self._fits_slot(old, tile, obs)
+                for old in rnd.get("unresolved", [])
+            ):
+                continue
+            first = track[0][0]
+            seats = sorted(
+                {
+                    o.active
+                    for o in rows
+                    if first.time - 3.5 <= o.time <= first.time and o.active is not None
+                }
+            )
+            if not seats:
+                seats = [rnd.get("last_active")]
+            if rnd.get("indicator_unreliable"):
+                seats = [0, 1, 2, 3]
+            rnd.setdefault("unresolved", []).append(
+                dict(
+                    time=first.time,
+                    interval=[first.time, obs.time],
+                    stone=None,
+                    candidates=[stone],
+                    seat=seats[-1],
+                    seats=seats,
+                    action=None,
+                    region=list(tile.box),
+                    reason="short_observation",
+                    positions={s.stone: list(s.center) for s in obs.board},
+                    tile_size=max(tile.box[2:]),
+                    reading_times=[o.time for o, _ in track],
+                )
+            )
+
     def integrate(self, rounds, observations):
         for rnd in rounds:
             accounted_for = {e["stone"] for e in rnd["events"]}
@@ -405,53 +477,29 @@ class StoneRecovery:
                 if rnd["start"] <= o.time < rnd["end"] and not o.reveal and o.supported
             ]
             if rnd.get("complete") and len(accounted_for) < 28:
-                terminal = [o for o in rows if o.time >= rnd["end"] - 0.5]
-                hits = {}
-                for obs in terminal:
-                    for tile in obs.board:
-                        if tile.stone not in accounted_for:
-                            hits.setdefault(tile.stone, []).append((obs.time, tile))
-                confirmed = {
-                    stone
-                    for stone, track in hits.items()
-                    if any(
-                        0 < b[0] - a[0] <= 0.15 and math.dist(a[1].center, b[1].center) < 4
-                        for a, b in zip(track, track[1:])
-                    )
-                }
-                if confirmed:
-                    existing = list(rnd.get("unresolved", []))
-                    self._short(rnd, terminal)
-                    rnd["unresolved"] = existing + [
-                        e
-                        for e in rnd["unresolved"][len(existing) :]
-                        if e["candidates"][0] in confirmed
-                        and not any(
-                            not old["candidates"] or e["candidates"][0] in old["candidates"]
-                            for old in existing
-                        )
-                    ]
-                    for event in rnd["unresolved"][len(existing) :]:
-                        event["reading_times"] = [t for t, _ in hits[event["candidates"][0]]]
-                        if not event["seats"]:
-                            event["seat"] = rnd.get("last_active")
-                            event["seats"] = [event["seat"]]
-                        if rnd.get("indicator_unreliable"):
-                            event["seats"] = [0, 1, 2, 3]
+                self._terminal_slots(rnd, rows, accounted_for)
             for event in list(rnd.get("unresolved", [])):
                 if event["reason"] == "ambiguous_occlusion":
                     continue
+                later = {
+                    e["stone"]: e
+                    for e in rnd["events"]
+                    if event["reason"] == "occluded"
+                    and e["time"] > event["interval"][1] + 0.5
+                    and not e.get("recovery")
+                }
                 hits = {}
                 for obs in rows:
                     if not event["interval"][0] - 1 <= obs.time <= event["interval"][1] + 0.5:
                         continue
                     for tile in obs.board:
-                        if tile.stone in accounted_for:
+                        if tile.stone in accounted_for and tile.stone not in later:
                             continue
                         if event["candidates"] and tile.stone not in event["candidates"]:
                             continue
                         if obs.board and any(
                             s.stone in {e["stone"] for e in rnd["events"]}
+                            and s.stone != tile.stone
                             and math.dist(s.center, tile.center) < max(tile.box[2:]) * 4
                             for s in obs.board
                         ):
@@ -533,7 +581,16 @@ class StoneRecovery:
                 proof_row = next(o for o in rows if o.time == track[-1][0])
                 resolved["positions"] = {s.stone: list(s.center) for s in proof_row.board}
                 resolved["tile_size"] = max(track[-1][1].box[2:])
-                rnd["events"].append(resolved)
+                if stone in later:
+                    # A native flight into the old hidden slot dates the move
+                    # before its first unobstructed reading after a rearrangement.
+                    for field in ("positions", "tile_size"):
+                        if field in later[stone]:
+                            resolved[field] = later[stone][field]
+                    later[stone].update(resolved)
+                    resolved = later[stone]
+                else:
+                    rnd["events"].append(resolved)
                 accounted_for.add(stone)
                 self._entry(
                     rnd,
@@ -547,6 +604,23 @@ class StoneRecovery:
                 rnd["unresolved"].remove(event)
             rnd["events"].sort(key=lambda e: e["time"])
             for index, event in enumerate(rnd["events"], 1):
+                # Dense frames can reveal an endpoint hidden in every coarse
+                # layout. Keep the most complete settled layout for side checks.
+                sightings = [
+                    (o, s)
+                    for o in rows
+                    if o.time >= event["time"]
+                    for s in o.board
+                    if s.stone == event["stone"]
+                ]
+                for (before, first), (obs, tile) in zip(sightings, sightings[1:]):
+                    if (
+                        0 < obs.time - before.time <= 0.15
+                        and math.dist(first.center, tile.center) < 4
+                        and len(obs.board) > len(event.get("positions", {}))
+                    ):
+                        event["positions"] = {s.stone: list(s.center) for s in obs.board}
+                        event["tile_size"] = max(tile.box[2:])
                 event["id"] = index
                 if event.get("recovery"):
                     event["recovery"]["event_id"] = index

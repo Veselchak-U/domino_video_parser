@@ -32,6 +32,7 @@ class GameReconstructor:
         last_board = {}
         last_reveal = False
         first_seen = {}
+        placed_at = {}
         seen_at = {}
         hand_history = []
         saw_empty = False
@@ -60,6 +61,7 @@ class GameReconstructor:
                 reveal_rows = []
                 last_reveal = False
                 first_seen = {}
+                placed_at = {}
                 seen_at = {}
             if not obs.board:
                 saw_empty = True
@@ -100,9 +102,16 @@ class GameReconstructor:
                 else:
                     pending[stone] = dict(time=obs.time, count=1, tile=tile)
                 candidate = pending[stone]
+                if candidate["count"] >= 2 and any(
+                    s.stone in known and math.dist(s.center, tile.center) < max(tile.box[2:]) * 1.75
+                    for s in obs.board
+                ):
+                    # Preserve a briefly installed tile across a later occlusion.
+                    # This is a time anchor, not enough evidence to emit a move.
+                    placed_at.setdefault(stone, candidate["time"])
                 if candidate["count"] < 3:
                     continue
-                when = first_seen[stone]
+                when = min(placed_at.get(stone, first_seen[stone]), first_seen[stone])
                 seats = [p for t, p in history if t <= when - 0.3]
                 seat = seats[-1] if seats else (obs.active if obs.active is not None else None)
                 action = self._side(current["events"], tile, by_stone)
