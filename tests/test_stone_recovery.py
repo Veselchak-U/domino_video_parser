@@ -258,6 +258,54 @@ def test_native_animation_confirms_short_final_move_once():
     assert rounds[0]["stone_recovery"][0]["evidence"]["times"] == [1.95, 2, 2.05, 2.1]
 
 
+@pytest.mark.parametrize("complete,accounted", [(True, False), (True, True), (False, False)])
+def test_unsampled_final_placement_requests_bounded_window(complete, accounted):
+    rnd = dict(
+        start=1,
+        end=5,
+        complete=complete,
+        events=[dict(stone="1-1")],
+        remaining=[
+            [
+                f"{a}-{b}"
+                for a in range(7)
+                for b in range(a, 7)
+                if (a, b) != (1, 1) and (accounted or (a, b) != (4, 6))
+            ],
+            [],
+            [],
+            [],
+        ],
+        unresolved=[],
+    )
+    expected = [(4, 5)] if complete and not accounted else []
+    assert GameReconstructor().recovery_windows([rnd]) == expected
+
+
+@pytest.mark.parametrize("times", [[], [4.8], [4.5, 4.8], [4.8, 4.82]])
+@pytest.mark.parametrize("active,unreliable", [(0, False), (None, False), (None, True)])
+def test_dense_final_placement_requires_repeated_continuous_evidence(times, active, unreliable):
+    r = GameReconstructor()
+    first = tile("1-1")
+    rows = [row(t, [first]) for t in [1, 1.5, 2, 4.5]]
+    rows.append(Observation(5, [], [[], [], [], []], None, True, True))
+    rounds = r.extract(rows)
+    rounds[0]["indicator_unreliable"] = unreliable
+    extra = dense_rows(first, "1-6", times)
+    for observation in extra:
+        observation.active = active
+    r.integrate_recovery(rounds, extra)
+    r.integrate_recovery(rounds, extra)
+    slots = rounds[0]["unresolved"]
+    if len(times) == 2 and times[-1] - times[0] < 0.15:
+        assert len(slots) == 1
+        assert slots[0]["candidates"] == ["1-6"]
+        assert slots[0]["reading_times"] == times
+        assert slots[0]["seats"] == ([0, 1, 2, 3] if unreliable else [0])
+    else:
+        assert slots == []
+
+
 def test_cancelled_animation_does_not_create_move():
     r = GameReconstructor()
     first = tile("1-1")
@@ -385,6 +433,27 @@ def test_current_recording_recovers_complete_unique_game_from_native_motion_fram
     previous = [len(rnd["stone_recovery"]) for rnd in rounds]
     assert r.build(rounds, ["A", "B", "C", "D"], "withoutEggs", 50) == game
     assert [len(rnd["stone_recovery"]) for rnd in rounds] == previous
+
+
+def test_two_fps_recording_recovers_unsampled_fish_placement():
+    from domino_video.validator import GameValidator
+
+    r = GameReconstructor()
+    rounds = r.extract(load_recording_rows("tests/fixtures/unsampled_final_observations.json.gz"))
+    assert rounds[1]["unresolved"] == []
+    assert any(start <= 226.4996 <= stop for start, stop in r.recovery_windows(rounds))
+    r.integrate_recovery(
+        rounds, load_recording_rows("tests/fixtures/occluded_motion_observations.json.gz")
+    )
+    game = r.build(rounds, ["A", "B", "C", "D"], "withoutEggs", 50)
+    GameValidator().validate(game)
+    assert game["rounds"][1]["moves"][-1] == dict(player="C", action="right", stone="6-4")
+    assert game["rounds"][1]["result"]["reason"] == "fish"
+    assert any(
+        e["method"] == "exclusion" and e["stone"] == "4-6" for e in rounds[1]["stone_recovery"]
+    )
+    proof = next(e for e in rounds[1]["stone_recovery"] if e["stone"] == "4-6")
+    assert proof["evidence"]["times"] == [226.4996111111111, 226.5158]
 
 
 @pytest.mark.parametrize("kind", ["two_missing", "duplicate"])

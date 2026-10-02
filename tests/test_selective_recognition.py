@@ -61,6 +61,41 @@ def test_field_requests_do_not_read_unrequested_names_or_counts():
     assert set(scores.crops) == {"scores"}
 
 
+@pytest.mark.parametrize(
+    "text,expected,limit",
+    [
+        ("0(+12)/50", 0, 50),
+        ("13 (+ 8) / 101", 13, 101),
+        ("22/50", 22, 50),
+        ("0(+?)/50", None, 50),
+        ("0(-12)/50", None, 50),
+        ("0(+12)/51", None, 50),
+        ("0(+12)/500", None, 50),
+    ],
+)
+def test_score_with_fence_uses_recorded_total_without_more_ocr(text, expected, limit):
+    from domino_video.ocr_result import OCRResult
+
+    image = cv2.imread("tests/fixtures/frame_20.png")
+    prepared = ScreenRecognizer().prepare(image, 20, OCRFields(scores=True))
+    readings = iter([text, f"22/{limit}"])
+    calls = []
+
+    def read(crop):
+        calls.append(crop)
+        return OCRResult.from_rows([(None, next(readings), 0.99)])
+
+    observation = prepared.finish(read)
+    assert len(calls) == 2
+    if expected is None:
+        assert observation.scores is None
+        assert observation.ocr_attempts[0]["reason"] == "invalid_format"
+    else:
+        assert observation.scores == (expected, 22)
+        assert observation.limit == limit
+        assert observation.ocr_attempts[0]["reason"] is None
+
+
 def test_only_ambiguous_moves_request_counters_and_final_fields_are_bounded():
     def row(t, board=True, table=False):
         return Observation(

@@ -377,6 +377,12 @@ class StoneRecovery:
         for rnd in rounds:
             if not rnd.get("complete"):
                 continue
+            if rnd.get("remaining") is not None:
+                used = {e["stone"] for e in rnd["events"] if e["stone"] is not None}
+                used.update(s for hand in rnd["remaining"] for s in hand)
+                if len(used) < 28:
+                    # A final placement may fall entirely between ordinary samples.
+                    windows.append((max(rnd["start"], rnd["end"] - 1), rnd["end"]))
             for event in rnd.get("unresolved", []):
                 start = max(rnd["start"], event["interval"][0] - 1)
                 stop = min(rnd["end"], event["interval"][1] + 0.5)
@@ -398,6 +404,40 @@ class StoneRecovery:
                 for o in observations
                 if rnd["start"] <= o.time < rnd["end"] and not o.reveal and o.supported
             ]
+            if rnd.get("complete") and len(accounted_for) < 28:
+                terminal = [o for o in rows if o.time >= rnd["end"] - 0.5]
+                hits = {}
+                for obs in terminal:
+                    for tile in obs.board:
+                        if tile.stone not in accounted_for:
+                            hits.setdefault(tile.stone, []).append((obs.time, tile))
+                confirmed = {
+                    stone
+                    for stone, track in hits.items()
+                    if any(
+                        0 < b[0] - a[0] <= 0.15 and math.dist(a[1].center, b[1].center) < 4
+                        for a, b in zip(track, track[1:])
+                    )
+                }
+                if confirmed:
+                    existing = list(rnd.get("unresolved", []))
+                    self._short(rnd, terminal)
+                    rnd["unresolved"] = existing + [
+                        e
+                        for e in rnd["unresolved"][len(existing) :]
+                        if e["candidates"][0] in confirmed
+                        and not any(
+                            not old["candidates"] or e["candidates"][0] in old["candidates"]
+                            for old in existing
+                        )
+                    ]
+                    for event in rnd["unresolved"][len(existing) :]:
+                        event["reading_times"] = [t for t, _ in hits[event["candidates"][0]]]
+                        if not event["seats"]:
+                            event["seat"] = rnd.get("last_active")
+                            event["seats"] = [event["seat"]]
+                        if rnd.get("indicator_unreliable"):
+                            event["seats"] = [0, 1, 2, 3]
             for event in list(rnd.get("unresolved", [])):
                 if event["reason"] == "ambiguous_occlusion":
                     continue
@@ -566,7 +606,7 @@ class StoneRecovery:
         if event not in events:
             events.append(deepcopy(event))
             events.sort(key=lambda e: e["time"])
-        self._entry(
+        entry = self._entry(
             rnd,
             event,
             "exclusion",
@@ -577,4 +617,6 @@ class StoneRecovery:
                 remaining=deepcopy(rnd["remaining"]),
             ),
         )
+        if event.get("reading_times"):
+            entry["evidence"]["times"] = list(event["reading_times"])
         return True

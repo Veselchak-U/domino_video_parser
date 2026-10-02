@@ -111,7 +111,7 @@ class PreparedObservation:
             values = []
             for i, crop in enumerate(self.crops["scores"]):
                 value, attempt = text(crop, "score", team="AB"[i])
-                match = re.search(r"(\d+)\s*/\s*(50|101)", value)
+                match = re.search(r"(\d+)\s*(?:\(\s*\+\s*\d+\s*\))?\s*/\s*(50|101)(?!\d)", value)
                 if not match:
                     if attempt["reason"] is None:
                         attempt["reason"] = "invalid_format"
