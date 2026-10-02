@@ -48,7 +48,7 @@ def main(argv=None):
         "--device",
         choices=["auto", "cpu", "gpu"],
         default="auto",
-        help="устройство OCR: auto (по умолчанию), cpu или gpu (DirectML)",
+        help="устройство: auto (по умолчанию), cpu или gpu; OCR DirectML, декодирование CUDA с CPU-возвратом",
     )
     parser.add_argument(
         "--gpu-workers",

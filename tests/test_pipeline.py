@@ -51,8 +51,46 @@ def test_sequential_preserves_ocr_schedule_and_closes_input():
     assert closed == [True]
 
 
+def test_motion_pass_never_reads_text_or_initializes_gpu(monkeypatch):
+    from types import SimpleNamespace
+
+    calls = []
+
+    class MotionRecognizer:
+        def prepare(self, image, timestamp, read_text, read_motion=False):
+            calls.append((timestamp, read_text, read_motion))
+            return SimpleNamespace(observation=SimpleNamespace(time=timestamp, dense=False))
+
+        def close(self):
+            calls.append("closed")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Motion pass initialized OCR")
+
+    monkeypatch.setattr("domino_video.pipeline.DeviceOCR", forbidden)
+    frames = ((t, None) for t in (0, 0.1, 0.2))
+    rows = list(ObservationPipeline(1, recognizer=MotionRecognizer(), motion=True).observe(frames))
+    assert [(o.time, o.dense) for o in rows] == [(0, True), (0.1, True), (0.2, True)]
+    assert calls == [(0, False, True), (0.1, False, True), (0.2, False, True), "closed"]
+
+
+def test_real_motion_pool_matches_sequential_and_closes():
+    import multiprocessing
+
+    import cv2
+
+    image = cv2.imread("tests/fixtures/frame_20.png")
+    baseline = {p.pid for p in multiprocessing.active_children()}
+    expected = list(ObservationPipeline(1, motion=True).observe((t, image) for t in (0, 0.1)))
+    actual = list(ObservationPipeline(2, motion=True).observe((t, image) for t in (0, 0.1)))
+    assert actual == expected
+    assert all(o.dense and not o.ocr_attempts for o in actual)
+    assert {p.pid for p in multiprocessing.active_children()} == baseline
+
+
 @pytest.mark.parametrize("failure", [None, ValueError, KeyboardInterrupt])
-def test_parallel_bounds_queue_preserves_order_and_closes(monkeypatch, failure):
+@pytest.mark.parametrize("motion", [False, True])
+def test_parallel_bounds_queue_preserves_order_and_closes(monkeypatch, failure, motion):
     consumed = []
     completed = []
     closed = []
@@ -92,7 +130,7 @@ def test_parallel_bounds_queue_preserves_order_and_closes(monkeypatch, failure):
             assert len(consumed) - len(completed) <= 4
             yield t, None
 
-    iterator = ObservationPipeline(2).observe(frames())
+    iterator = ObservationPipeline(2, motion=motion).observe(frames())
     if failure:
         with pytest.raises(failure):
             list(iterator)
@@ -120,7 +158,8 @@ def test_real_spawn_pool_matches_sequential_and_leaves_no_children():
     assert {p.pid for p in multiprocessing.active_children()} == baseline
 
 
-def test_real_spawn_pool_closes_on_consumer_interrupt():
+@pytest.mark.parametrize("motion", [False, True])
+def test_real_spawn_pool_closes_on_consumer_interrupt(motion):
     import multiprocessing
     from contextlib import closing
 
@@ -129,7 +168,7 @@ def test_real_spawn_pool_closes_on_consumer_interrupt():
     baseline = {p.pid for p in multiprocessing.active_children()}
     frames = ((t, np.zeros((720, 1608, 3), dtype=np.uint8)) for t in range(12))
     with pytest.raises(KeyboardInterrupt):
-        with closing(ObservationPipeline(2).observe(frames)) as results:
+        with closing(ObservationPipeline(2, motion=motion).observe(frames)) as results:
             next(results)
             raise KeyboardInterrupt
     assert {p.pid for p in multiprocessing.active_children()} == baseline

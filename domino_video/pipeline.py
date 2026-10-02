@@ -56,6 +56,16 @@ def _prepare_frame(image, timestamp, read_text):
     return _recognizer.prepare(image, timestamp, read_text)
 
 
+def _motion_observation(recognizer, image, timestamp):
+    result = recognizer.prepare(image, timestamp, False, read_motion=True).observation
+    result.dense = True
+    return result
+
+
+def _motion_frame(image, timestamp, read_text):
+    return _motion_observation(_recognizer, image, timestamp)
+
+
 class ObservationPipeline:
     def __init__(
         self,
@@ -65,6 +75,7 @@ class ObservationPipeline:
         message=None,
         gpu_workers="auto",
         fields: dict[float, OCRFields] | None = None,
+        motion=False,
     ):
         self.workers = workers
         self._recognizer = recognizer
@@ -72,8 +83,12 @@ class ObservationPipeline:
         self._message = message
         self._gpu_workers = gpu_workers
         self._fields = fields
+        self._motion = motion
 
     def observe(self, frames):
+        if self._motion:
+            yield from self._observe(frames, None)
+            return
         with closing(frames), DeviceOCR(self._device, self._gpu_workers) as gpu:
             if self._message:
                 self._message(gpu.description)
@@ -81,12 +96,17 @@ class ObservationPipeline:
 
     def _observe(self, frames, gpu):
         cv2.setNumThreads(1)
+        gpu_enabled = gpu is not None and gpu.enabled
         with closing(frames):
-            if self.workers == 1 and not gpu.enabled:
+            if self.workers == 1 and not gpu_enabled:
                 recognizer = self._recognizer or ScreenRecognizer()
                 try:
                     for image, timestamp, read_text in self._jobs(frames):
-                        yield recognizer.observe(image, timestamp, read_text)
+                        yield (
+                            _motion_observation(recognizer, image, timestamp)
+                            if self._motion
+                            else recognizer.observe(image, timestamp, read_text)
+                        )
                 finally:
                     if hasattr(recognizer, "close"):
                         recognizer.close()
@@ -122,9 +142,14 @@ class ObservationPipeline:
                             future = Future()
                             future.set_result(recognizer.prepare(*job))
                         else:
-                            future = executor.submit(
-                                _prepare_frame if gpu.enabled else _observe_frame, *job
+                            work = (
+                                _motion_frame
+                                if self._motion
+                                else _prepare_frame
+                                if gpu_enabled
+                                else _observe_frame
                             )
+                            future = executor.submit(work, *job)
                         pending[future] = submitted
                         submitted += 1
                     if not pending:
@@ -133,14 +158,14 @@ class ObservationPipeline:
                     for future in completed:
                         number = pending.pop(future)
                         result = future.result()
-                        if gpu.enabled and future not in gpu_pending and result.crops:
+                        if gpu_enabled and future not in gpu_pending and result.crops:
                             following = gpu.submit(result)
                             pending[following] = number
                             gpu_pending.add(following)
                         else:
                             ready[number] = (
                                 result.observation
-                                if gpu.enabled and future not in gpu_pending
+                                if gpu_enabled and future not in gpu_pending
                                 else result
                             )
                         gpu_pending.discard(future)

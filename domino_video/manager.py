@@ -18,6 +18,7 @@ from .vision import ScreenRecognizer
 
 class ParseManager:
     def __init__(self, reader=None, recognizer=None, time_resolver=None):
+        self._custom_reader = reader is not None
         self._reader = reader or VideoReader()
         self._recognizer = recognizer or ScreenRecognizer()
         self._reconstructor = GameReconstructor()
@@ -38,6 +39,9 @@ class ParseManager:
         gpu_workers="auto",
     ):
         progress = ConsoleProgress()
+        if not self._custom_reader:
+            self._reader = VideoReader(workers, device, progress.message)
+            self._samples = RecognitionSamples(self._reader, self._storage)
         progress.message(f"Процессов распознавания: {workers}")
         failures = False
         hashes = {}
@@ -77,14 +81,13 @@ class ParseManager:
                     windows = self._reconstructor.recovery_windows(rounds)
                     if windows and hasattr(self._reader, "interval_frames"):
                         progress.message(f"Дополнительное чтение камней: {len(windows)} интервалов")
-                        extra = []
-                        with closing(self._reader.interval_frames(path, windows)) as frames:
-                            for timestamp, image in frames:
-                                observed = self._recognizer.prepare(
-                                    image, timestamp, False, read_motion=True
-                                ).observation
-                                observed.dense = True
-                                extra.append(observed)
+                        pipeline = ObservationPipeline(
+                            workers, recognizer=self._recognizer, motion=True
+                        )
+                        with closing(
+                            pipeline.observe(self._reader.interval_frames(path, windows))
+                        ) as rows:
+                            extra = list(rows)
                         self._reconstructor.integrate_recovery(rounds, extra)
                     if any(o.selective for o in observations):
                         self._read_fields(
@@ -280,6 +283,10 @@ class ParseManager:
         progress.message(f"Адресное чтение текста: {len(requests)} кадров")
 
         def frames():
+            if hasattr(self._reader, "selected_frames"):
+                with closing(self._reader.selected_frames(path, requests)) as selected:
+                    yield from selected
+                return
             for timestamp in sorted(requests):
                 yield timestamp, self._reader.frame_at(path, timestamp)
 
