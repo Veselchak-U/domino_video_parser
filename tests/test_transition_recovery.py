@@ -56,6 +56,26 @@ def test_real_pass_transition_does_not_create_move():
     ]
 
 
+def test_real_chain_rearrangement_is_not_an_incoming_placement():
+    with gzip.open("tests/fixtures/chain_motion1453.json.gz", "rt", encoding="utf8") as stream:
+        data = json.load(stream)
+    rows = []
+    for value in data["native"]:
+        for field in ("board", "uncertain_board"):
+            value[field] = [
+                StoneObservation(tuple(s["values"]), tuple(s["box"])) for s in value[field]
+            ]
+        rows.append(Observation(**value))
+    track = [
+        (obs, tile)
+        for obs in rows
+        if 83.4686 <= obs.time <= 84.3395
+        for tile in obs.board
+        if tile.stone == "3-5"
+    ]
+    assert not StoneRecovery()._incoming(data["round"], rows, track)
+
+
 def test_duplicate_timestamps_do_not_establish_transition():
     fixture = load_fixture()
     rnd = fixture["round"]

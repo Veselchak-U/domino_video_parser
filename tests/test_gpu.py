@@ -228,7 +228,12 @@ def test_gpu_pipeline_order_bounds_owner_and_cleanup(monkeypatch, workers, failu
 
 
 @pytest.mark.parametrize(
-    "name,read_text,expected", [("20", True, 9), ("20", False, 0), ("84", True, 2)]
+    "name,read_text,expected",
+    [
+        ("20", True, {"names": 4, "counts": 3, "scores": 2}),
+        ("20", False, {}),
+        ("84", True, {"scores": 2, "reveal_points": 4}),
+    ],
 )
 def test_prepared_crops_preserve_observations(name, read_text, expected):
     import cv2
@@ -240,7 +245,7 @@ def test_prepared_crops_preserve_observations(name, read_text, expected):
     image = cv2.imread(f"tests/fixtures/frame_{name}.png")
     recognizer = ScreenRecognizer()
     prepared = recognizer.prepare(image, float(name), read_text)
-    assert sum(map(len, prepared.crops.values())) == expected
+    assert {field: len(crops) for field, crops in prepared.crops.items()} == expected
     for group in prepared.crops.values():
         for crop in group:
             assert not np.shares_memory(crop, image)
@@ -317,6 +322,11 @@ def test_gpu_failure_does_not_break_next_source(tmp_path, monkeypatch, observati
         ),
     )
     sources = [tmp_path / f"2026-09-28-13-{minute}.mp4" for minute in (58, 59)]
+    # This lifecycle test passes Observation objects instead of video pixels.
+    # Evidence attachments are exercised with real images in sample tests.
+    monkeypatch.setattr(
+        "domino_video.recognition_samples.RecognitionSamples.write_stones", lambda *args: False
+    )
     for source in sources:
         source.write_bytes(b"fixture")
     output = tmp_path / "out"

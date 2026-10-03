@@ -411,6 +411,7 @@ class GameReconstructor:
         states = [([], None, None, [[] for _ in range(4)], [set() for _ in range(4)], Counter())]
         for index, event in enumerate(events):
             entry = event_trace(event, index, len(states))
+            simultaneous = bool(index and abs(event["time"] - events[index - 1]["time"]) < 0.01)
             if diagnostics is not None:
                 diagnostics.append(entry)
             expanded = []
@@ -430,12 +431,17 @@ class GameReconstructor:
                                 remaining=len(remaining[seat]),
                             )
                         continue
+                    if initial is not None and ((event["stone"] in initial) != (seat == 0)):
+                        reject(entry, "initial_hand_conflict", seat=seat + 1, initial_hand=initial)
+                        continue
                     conflicts = [
                         dict(seat=p + 1, selected_player=seat + 1, count=count)
                         for p, count in selected.items()
                         if count >= 2 and p != seat
                     ]
-                    if conflicts:
+                    if conflicts and not (
+                        initial is not None and event["stone"] in initial and seat == 0
+                    ):
                         reject(
                             entry,
                             "hand_counter_conflict",
@@ -443,9 +449,6 @@ class GameReconstructor:
                             phase="next_selection",
                             conflicts=conflicts,
                         )
-                        continue
-                    if initial is not None and ((event["stone"] in initial) != (seat == 0)):
-                        reject(entry, "initial_hand_conflict", seat=seat + 1, initial_hand=initial)
                         continue
                     if {a, b} & forbidden[seat]:
                         reject(
@@ -501,8 +504,34 @@ class GameReconstructor:
                                     0,
                                     "-".join(map(str, sorted(map(int, move["stone"].split("-"))))),
                                 )
+                        linked_sides = (
+                            {
+                                side
+                                for side, endpoint in (("left", chain[0]), ("right", chain[-1]))
+                                for link in event.get("placement_links", [])
+                                if link["stone"] == endpoint
+                            }
+                            if len(chain) > 1
+                            else set()
+                        )
                         if (
                             not event["action"]
+                            and not simultaneous
+                            and len(linked_sides) == 1
+                            and action not in linked_sides
+                        ):
+                            reject(
+                                entry,
+                                "geometry_conflict",
+                                seat=seat + 1,
+                                action=action,
+                                observed_side=next(iter(linked_sides)),
+                                evidence="placement_contact",
+                            )
+                            continue
+                        if (
+                            not event["action"]
+                            and not simultaneous
                             and action != "start"
                             and len(chain) > 1
                             and all(s in positions for s in [chain[0], chain[-1], event["stone"]])
@@ -575,11 +604,14 @@ class GameReconstructor:
                                 new_played,
                                 events[index + 1] if index + 1 < len(events) else None,
                             )
-                            if any(
-                                count >= 2 and value != 7 - len(new_played[p])
-                                for p, reading in enumerate(readings)
-                                if p != 0
-                                for value, count in reading.items()
+                            if (
+                                any(
+                                    count >= 2 and value != 7 - len(new_played[p])
+                                    for p, reading in enumerate(readings)
+                                    if p != 0
+                                    for value, count in reading.items()
+                                )
+                                and not simultaneous
                             ):
                                 conflicts = [
                                     dict(

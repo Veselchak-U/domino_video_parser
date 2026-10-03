@@ -1,9 +1,18 @@
 import pytest
 
 
+@pytest.fixture
+def no_image_samples(monkeypatch):
+    # These export tests supply Observation objects rather than video pixels.
+    # Real evidence attachment writing has its own image-backed tests.
+    monkeypatch.setattr(
+        "domino_video.recognition_samples.RecognitionSamples.write_stones", lambda *args: False
+    )
+
+
 @pytest.mark.parametrize("failure", [None, "publish", "validation"])
 def test_repeated_game_export_preserves_or_replaces_result(
-    tmp_path, observations, sample_game, monkeypatch, capsys, failure
+    tmp_path, observations, sample_game, monkeypatch, capsys, failure, no_image_samples
 ):
     import json
     import os
@@ -102,7 +111,9 @@ def test_replaces_report_on_repeated_processing(tmp_path):
     assert list((output / "report").iterdir()) == [existing]
 
 
-def test_exports_two_games_and_same_basename_without_collision(tmp_path, observations, sample_game):
+def test_exports_two_games_and_same_basename_without_collision(
+    tmp_path, observations, sample_game, no_image_samples
+):
     import json
     from copy import deepcopy
 
@@ -150,7 +161,9 @@ def test_exports_two_games_and_same_basename_without_collision(tmp_path, observa
         assert json.loads(path.read_text(encoding="utf-8")) == sample_game
 
 
-def test_fallback_time_shared_by_all_outputs_and_ambiguous_source_continues(tmp_path, observations):
+def test_fallback_time_shared_by_all_outputs_and_ambiguous_source_continues(
+    tmp_path, observations, no_image_samples
+):
     import json
     from copy import deepcopy
     from datetime import datetime, timedelta, timezone

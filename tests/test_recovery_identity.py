@@ -39,3 +39,21 @@ def test_actual_native_placement_still_resolves_once():
     assert len(moves) == 1
     assert moves[0]["recovery"]["method"] == "animation"
     assert moves[0]["time"] < rounds[0]["end"]
+
+
+def test_rotating_old_double_does_not_date_future_move_during_chain_rearrangement():
+    with gzip.open("tests/fixtures/rotating_old_tile.json.gz", "rt", encoding="utf8") as stream:
+        fixture = json.load(stream)
+    rows = []
+    for value in fixture["native"]:
+        for field in ("board", "uncertain_board"):
+            value[field] = [
+                StoneObservation(tuple(s["values"]), tuple(s["box"])) for s in value[field]
+            ]
+        rows.append(Observation(**value))
+    rnd = fixture["round"]
+    GameReconstructor().integrate_recovery([rnd], rows)
+    future = next(e for e in rnd["events"] if e["stone"] == "1-4")
+    actual = next(e for e in rnd["events"] if e["stone"] == "5-6")
+    assert future["time"] > 175
+    assert actual["time"] == pytest.approx(166.0733888888889)

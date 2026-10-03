@@ -186,7 +186,7 @@ class ScreenRecognizer:
         supported = cv2.countNonZero(green) > 150000 and not result_table
         level = float(np.median(table[:, :, 2][green > 0])) if supported else 0
         reveal = supported and level < 80
-        tiles = self._stones(im, hsv, read_motion)
+        tiles = self._stones(im, hsv, read_motion, supported and not reveal)
         board = []
         uncertain_board = []
         hands = [[], [], [], []]
@@ -196,18 +196,21 @@ class ScreenRecognizer:
         board_top = 75 if read_motion else 140
         for tile in tiles:
             x, y, w, h = tile.box
+            center_x = tile.center[0]
             if tile.stone is None:
                 if reveal:
-                    if 45 < y < 150 and 100 < x < 1450:
-                        uncertain_hands[1 if x < 500 else (2 if x < 1050 else 3)] = True
+                    if 45 < y < 150 and 100 < center_x < 1450:
+                        uncertain_hands[1 if center_x < 500 else (2 if center_x < 1050 else 3)] = (
+                            True
+                        )
                     elif 390 < y < 470 and 500 < x < 1150:
                         uncertain_hands[0] = True
-                if not reveal and 140 < y < 550 and 180 < x < 1480:
+                if not reveal and board_top < y < 550 and 180 < x < 1480:
                     uncertain_board.append(tile)
                 continue
             if reveal:
-                if 45 < y < 150 and h > w and 100 < x < 1450:
-                    seat = 1 if x < 500 else (2 if x < 1050 else 3)
+                if 45 < y < 150 and h > w and 100 < center_x < 1450:
+                    seat = 1 if center_x < 500 else (2 if center_x < 1050 else 3)
                     hands[seat].append(tile.stone)
                 elif 390 < y < 470 and h > w and 500 < x < 1150:
                     hands[0].append(tile.stone)
@@ -273,9 +276,14 @@ class ScreenRecognizer:
             ]
         return PreparedObservation(result, crops)
 
-    def _stones(self, im, hsv, read_motion=False):
+    def _stones(self, im, hsv, read_motion=False, mask_counts=True):
         mask = cv2.inRange(hsv, np.array([12, 15, 195]), np.array([40, 230, 255]))
         mask[560:] = cv2.inRange(hsv[560:], np.array([12, 15, 75]), np.array([40, 230, 255]))
+        count_areas = ScreenProfile.areas["count"] if read_motion and mask_counts else []
+        # The ivory count badges can merge with a board tile in the colour
+        # mask. Keep only its observed footprint and never read clipped pips.
+        for x, y, x2, y2 in count_areas:
+            mask[y:y2, x:x2] = 0
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         found = []
         for contour in contours:
@@ -308,6 +316,11 @@ class ScreenRecognizer:
                 continue
             else:
                 crop = im[y + 3 : y + h - 3, x + 3 : x + w - 3]
+            if any(
+                x < x2 and x + w > x1 and y < y2 and y + h > y1 for x1, y1, x2, y2 in count_areas
+            ):
+                found.append(StoneObservation((None, None), (x, y, w, h)))
+                continue
             overlaps_avatar = any(
                 (max(x, min(ax, x + w)) - ax) ** 2 + (max(y, min(ay, y + h)) - ay) ** 2 < 45**2
                 for ax, ay in [(188, 538), (157, 80), (691, 80), (1224, 80)]
