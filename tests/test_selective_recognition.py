@@ -1,5 +1,7 @@
+from fractions import Fraction
 from types import SimpleNamespace
 
+import av
 import cv2
 import numpy as np
 import pytest
@@ -21,8 +23,12 @@ def test_default_stone_sampling_is_two_frames_per_second(monkeypatch):
             pass
 
         def decode(self, **kwargs):
-            for t in [0, 0.25, 0.5, 0.75, 1]:
-                yield SimpleNamespace(time=t, to_ndarray=lambda **kwargs: None)
+            for pts in range(5):
+                frame = av.VideoFrame.from_ndarray(
+                    np.zeros((4, 4, 3), dtype=np.uint8), format="bgr24"
+                )
+                frame.pts, frame.time_base = pts, Fraction(1, 4)
+                yield frame
 
     monkeypatch.setattr("domino_video.video.av.open", lambda path: Container())
     assert [t for t, _ in VideoReader().frames("fixture")] == [0, 0.5, 1]

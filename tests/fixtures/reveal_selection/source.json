@@ -1,0 +1,31 @@
+{
+  "source": "Record_2026-09-29-20-30-58_ef23194d097aa6e1b107d0f095c4226c.mp4",
+  "sha256": "8e0a4398303db44eb181f81f02cd0d0634ed9dcfed06450c5177d0e254d068ef",
+  "frames": [
+    {
+      "time": 146.90235555555554,
+      "file": "146.9024.png"
+    },
+    {
+      "time": 147.4041,
+      "file": "147.4041.png"
+    },
+    {
+      "time": 147.90467777777778,
+      "file": "147.9047.png"
+    },
+    {
+      "time": 148.4047111111111,
+      "file": "148.4047.png"
+    },
+    {
+      "time": 155.5985,
+      "file": "155.5985.png"
+    },
+    {
+      "time": 156.09942222222222,
+      "file": "156.0994.png"
+    }
+  ],
+  "expectation": "Two actual accepted own zeros at146.9023556 and147.9046778.147.4041/148.404711 low confidence remain unknown.155.5985/156.099422 next deal has no panels."
+}

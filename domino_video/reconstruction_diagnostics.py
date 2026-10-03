@@ -2,7 +2,6 @@
 
 from copy import deepcopy
 
-
 REASONS = {
     "unknown_player": "неизвестен исполнитель",
     "hand_capacity_exceeded": "переполнение руки",
@@ -35,9 +34,7 @@ def event_trace(event, index, states):
 
 
 def reject(entry, code, **evidence):
-    reason = entry["rejections"].setdefault(
-        code, dict(count=0, examples=[], omitted_examples=0)
-    )
+    reason = entry["rejections"].setdefault(code, dict(count=0, examples=[], omitted_examples=0))
     reason["count"] += 1
     if len(reason["examples"]) < 2:
         reason["examples"].append(deepcopy(evidence))
@@ -53,8 +50,7 @@ def failure_message(number, failure):
         if failure["time"] is not None:
             message += f", время {failure['time']:.3f} с"
         reasons = ", ".join(
-            f"{REASONS[code]} ({reason['count']})"
-            for code, reason in failure["rejections"].items()
+            f"{REASONS[code]} ({reason['count']})" for code, reason in failure["rejections"].items()
         )
         message += f"; отклонённые ветви: {reasons}"
     return message

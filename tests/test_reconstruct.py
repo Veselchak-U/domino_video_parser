@@ -61,3 +61,39 @@ def test_rejects_truncated_beginning(observations):
             "withoutEggs",
             50,
         )
+
+
+def test_delayed_start_keeps_chronological_sides():
+    """14:31 recording, 18.4–23.9s: 1-1 starts, then 6-1 on its left."""
+    import gzip
+    import json
+
+    from domino_video.reconstruct import GameReconstructor
+    from domino_video.vision import Observation, StoneObservation
+
+    with gzip.open("tests/fixtures/delayed_start.json.gz", "rt", encoding="utf8") as f:
+        rows = json.load(f)
+    for row in rows:
+        for field in ("board", "uncertain_board"):
+            row[field] = [StoneObservation(**s) for s in row[field]]
+    events = GameReconstructor().extract([Observation(**row) for row in rows])[0]["events"]
+    assert [(e["stone"], e["action"]) for e in events[:3]] == [
+        ("1-1", "start"),
+        ("1-6", "left"),
+        ("4-6", "left"),
+    ]
+
+
+def test_side_is_not_inferred_from_unrelated_later_rearrangement():
+    from domino_video.reconstruct import GameReconstructor
+    from domino_video.vision import Observation, StoneObservation
+
+    first = StoneObservation((1, 1), (800, 280, 60, 120))
+    second = StoneObservation((1, 2), (900, 300, 120, 60))
+    rows = [Observation(0, [], [[], [], [], []], 0, False, True)]
+    rows += [Observation(t, [first], [[], [], [], []], 0, False, True) for t in (0.5, 1, 1.5)]
+    rows += [Observation(t, [second], [[], [], [], []], 1, False, True) for t in (2, 2.5, 3)]
+    rows.append(Observation(4, [first, second], [[], [], [], []], 2, False, True))
+    events = GameReconstructor().extract(rows)[0]["events"]
+    assert events[1]["stone"] == "1-2"
+    assert events[1]["action"] is None

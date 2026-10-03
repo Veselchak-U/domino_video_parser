@@ -1,0 +1,20 @@
+{
+  "source": "Record_2026-10-01-19-44-20_ef23194d097aa6e1b107d0f095c4226c.mp4",
+  "samples": [
+    {
+      "file": "reveal_zero_points.png",
+      "time": 224.50272222222222,
+      "expected_points": [
+        23,
+        15,
+        4,
+        0
+      ]
+    },
+    {
+      "file": "reveal_partial_points.png",
+      "time": 224.0008777777778,
+      "expected_right_points": null
+    }
+  ]
+}

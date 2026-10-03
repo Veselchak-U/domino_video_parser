@@ -6,6 +6,7 @@ from pathlib import Path
 from time import perf_counter
 
 import av
+from av.video.reformatter import VideoReformatter
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class VideoReader:
         self._source = None
         self._hardware = False
         self._pixel_format = None
+        self._reformatter = None
 
     def _select_decoder(self, path):
         if self._source == str(path):
@@ -97,7 +99,11 @@ class VideoReader:
             # different chroma interpolation than the source's planar format.
             # Download only sampled frames and preserve the CPU pixel path.
             frame = frame.reformat(format=self._pixel_format)
-        return frame.to_ndarray(format="bgr24")
+        # Reuse the swscale context instead of allocating one for every native
+        # frame. Keep the same default conversion and source pixel format.
+        if self._reformatter is None:
+            self._reformatter = VideoReformatter()
+        return self._reformatter.reformat(frame, format="bgr24").to_ndarray(format="bgr24")
 
     def interval_frames(self, path, windows):
         """Decode only merged native-PTS windows; release the container on close."""

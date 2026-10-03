@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 import cv2
 import numpy as np
 
+from .avatar_timer import AvatarTimerReader
 from .name_ocr import NameOCR, NameReading
 from .ocr_result import NAME_OCR_THRESHOLD, OCR_THRESHOLD, OCRResult
 from .recognition_plan import OCRFields
@@ -49,12 +50,17 @@ class Observation:
     dense: bool = False
     result_table: bool = False
     selective: bool = False
+    reveal_points: tuple[int | None, ...] | None = None
+    reveal_panels_complete: tuple[bool, ...] | None = None
+    active_method: str | None = None
+    timer_value: int | None = None
+    timer_status: str | None = None
 
 
 @dataclass
 class PreparedObservation:
     observation: Observation
-    crops: dict[str, list[np.ndarray]]
+    crops: dict[str, list[np.ndarray | None]]
 
     def finish(self, read, read_name=None):
         result = self.observation
@@ -125,6 +131,21 @@ class PreparedObservation:
                 for attempt in result.ocr_attempts:
                     if attempt["field"] == "score":
                         attempt["reason"] = "invalid_format"
+        if "reveal_points" in self.crops:
+            points = []
+            for i, crop in enumerate(self.crops["reveal_points"]):
+                if crop is None:
+                    points.append(None)
+                    continue
+                value, attempt = text(crop, "reveal_points", seat=i + 1)
+                match = re.fullmatch(r"\d{1,2}", value)
+                number = int(match[0]) if match else None
+                if number is None or number > 84:
+                    number = None
+                    if attempt["reason"] is None:
+                        attempt["reason"] = "invalid_format"
+                points.append(number)
+            result.reveal_points = tuple(points)
         return result
 
 
@@ -132,6 +153,7 @@ class ScreenRecognizer:
     def __init__(self):
         self._ocr = None
         self._name_ocr = None
+        self._timer = AvatarTimerReader()
 
     def normalize(self, image):
         candidates = []
@@ -168,12 +190,18 @@ class ScreenRecognizer:
         board = []
         uncertain_board = []
         hands = [[], [], [], []]
+        uncertain_hands = [False] * 4
         # Native recovery also follows incoming tiles above the table, before
         # they disappear under the upper avatars. Coarse board sampling does not.
         board_top = 75 if read_motion else 140
         for tile in tiles:
             x, y, w, h = tile.box
             if tile.stone is None:
+                if reveal:
+                    if 45 < y < 150 and 100 < x < 1450:
+                        uncertain_hands[1 if x < 500 else (2 if x < 1050 else 3)] = True
+                    elif 390 < y < 470 and 500 < x < 1150:
+                        uncertain_hands[0] = True
                 if not reveal and 140 < y < 550 and 180 < x < 1480:
                     uncertain_board.append(tile)
                 continue
@@ -187,31 +215,41 @@ class ScreenRecognizer:
                 hands[0].append(tile.stone)
             elif board_top < y < 550 and 180 < x < 1480:
                 board.append(tile)
-        intensity = []
-        for x, y in [(188, 538), (157, 80), (691, 80), (1224, 80)]:
-            crop = hsv[y - 45 : y + 46, x - 45 : x + 46]
-            intensity.append(
-                cv2.countNonZero(
-                    cv2.inRange(crop, np.array([8, 120, 170]), np.array([30, 255, 255]))
-                )
-            )
-        active = int(np.argmax(intensity)) if max(intensity) > 500 and not reveal else None
+        active, active_method = profile.active_indicator(hsv) if not reveal else (None, "none")
+        timer = self._timer.read(im) if supported and not reveal and not read_motion else None
+        if timer is not None and timer.status == "confirmed":
+            active, active_method = timer.seat, "timer"
+        elif timer is not None and timer.status == "ambiguous":
+            active, active_method = None, "ambiguous_timer"
+        elif timer is not None:
+            # A remaining rim after the digits disappear is not a fresh turn.
+            active, active_method = None, "timer_absent"
         result = Observation(time, board, hands, active, reveal, supported)
+        result.active_method = active_method
+        if timer is not None:
+            result.timer_value, result.timer_status = timer.value, timer.status
         result.result_table = result_table
         result.selective = isinstance(read_text, OCRFields)
         result.uncertain_board = uncertain_board
         result.hand_regions_valid = (supported and not reveal, False, False, False)
         if reveal:
+            result.reveal_panels_complete = tuple(
+                profile.reveal_panel_complete(hsv, seat) for seat in range(1, 5)
+            )
             # Reveal settles progressively. A darkened, unobstructed area is
             # necessary; zero detected tiles alone does not prove an empty hand.
             result.reveal_valid = tuple(
-                supported and float(np.median(hsv[y1:y2, x1:x2, 2])) < 110
-                for x1, y1, x2, y2 in [
-                    (500, 385, 1150, 480),
-                    (100, 45, 500, 150),
-                    (500, 45, 1050, 150),
-                    (1050, 45, 1450, 150),
-                ]
+                supported
+                and not uncertain_hands[seat]
+                and float(np.median(hsv[y1:y2, x1:x2, 2])) < 110
+                for seat, (x1, y1, x2, y2) in enumerate(
+                    [
+                        (500, 385, 1150, 480),
+                        (100, 45, 500, 150),
+                        (500, 45, 1050, 150),
+                        (1050, 45, 1450, 150),
+                    ]
+                )
             )
         crops = {}
         fields = read_text if isinstance(read_text, OCRFields) else None
@@ -226,6 +264,13 @@ class ScreenRecognizer:
             crops["counts"] = [profile.crop(im, "count", seat=i) for i in range(2, 5)]
         if scores and supported:
             crops["scores"] = [profile.crop(im, "score", team=team) for team in "AB"]
+        if reveal and (fields.reveal_points if fields else bool(read_text)):
+            crops["reveal_points"] = [
+                profile.crop(im, "reveal_points", seat=seat)
+                if result.reveal_panels_complete[seat - 1]
+                else None
+                for seat in range(1, 5)
+            ]
         return PreparedObservation(result, crops)
 
     def _stones(self, im, hsv, read_motion=False):
@@ -364,3 +409,4 @@ class ScreenRecognizer:
         if self._name_ocr is not None:
             self._name_ocr.close()
         self._name_ocr = self._ocr = None
+        self._timer = AvatarTimerReader()

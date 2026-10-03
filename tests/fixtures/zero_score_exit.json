@@ -1,0 +1,715 @@
+{
+  "source": "Record_2026-10-02-15-01-48_ef23194d097aa6e1b107d0f095c4226c.mp4",
+  "sha256": "0ac81b912104ebd44776b0a644e0b0fbf33e06c83fcf522377bc2da6830ff765",
+  "expected_evidence": {
+    "first_finish_time": 124.308056,
+    "second_start_time": 145.004933,
+    "second_start_seat": 4,
+    "second_start_stone": "0-2",
+    "record_after_first": [
+      0,
+      0
+    ],
+    "fence_after_first": [
+      10,
+      0
+    ]
+  },
+  "teams": [
+    {
+      "id": "A",
+      "name": "Team A",
+      "players": [
+        {
+          "name": "eseIchacku59",
+          "seat": 1
+        },
+        {
+          "name": "PLlayer.2т*T*O9859",
+          "seat": 3
+        }
+      ]
+    },
+    {
+      "id": "B",
+      "name": "Team B",
+      "players": [
+        {
+          "name": "ћ*d61",
+          "seat": 2
+        },
+        {
+          "name": "P*layer.12334204261",
+          "seat": 4
+        }
+      ]
+    }
+  ],
+  "rounds": [
+    {
+      "number": 1,
+      "deal": {
+        "eseIchacku59": [
+          "1-1",
+          "1-3",
+          "2-4",
+          "2-5",
+          "4-5",
+          "4-6",
+          "5-6"
+        ],
+        "ћ*d61": [
+          "0-2",
+          "0-3",
+          "0-6",
+          "1-4",
+          "2-2",
+          "2-3",
+          "6-6"
+        ],
+        "PLlayer.2т*T*O9859": [
+          "0-0",
+          "0-4",
+          "1-5",
+          "3-3",
+          "3-4",
+          "3-6",
+          "4-4"
+        ],
+        "P*layer.12334204261": [
+          "0-1",
+          "0-5",
+          "1-2",
+          "1-6",
+          "2-6",
+          "3-5",
+          "5-5"
+        ]
+      },
+      "moves": [
+        {
+          "player": "eseIchacku59",
+          "action": "start",
+          "stone": "1-1"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "left",
+          "stone": "4-1"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "4-4"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "right",
+          "stone": "1-0"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "left",
+          "stone": "5-4"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "right",
+          "stone": "0-3"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "right",
+          "stone": "3-3"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "5-5"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "right",
+          "stone": "3-1"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "pass"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "1-5"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "2-1"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "left",
+          "stone": "5-2"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "pass"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "pass"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "3-5"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "pass"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "left",
+          "stone": "2-3"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "pass"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "6-2"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "left",
+          "stone": "4-6"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "pass"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "3-4"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "right",
+          "stone": "1-6"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "right",
+          "stone": "6-5"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "pass"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "6-3"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "right",
+          "stone": "5-0"
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "deal": {
+        "eseIchacku59": [
+          "0-6",
+          "1-2",
+          "1-6",
+          "2-2",
+          "2-3",
+          "4-4",
+          "4-5"
+        ],
+        "ћ*d61": [
+          "0-1",
+          "0-4",
+          "0-5",
+          "1-4",
+          "3-4",
+          "3-5",
+          "6-6"
+        ],
+        "PLlayer.2т*T*O9859": [
+          "0-0",
+          "1-1",
+          "2-5",
+          "2-6",
+          "3-3",
+          "3-6",
+          "5-5"
+        ],
+        "P*layer.12334204261": [
+          "0-2",
+          "0-3",
+          "1-3",
+          "1-5",
+          "2-4",
+          "4-6",
+          "5-6"
+        ]
+      },
+      "moves": [
+        {
+          "player": "P*layer.12334204261",
+          "action": "start",
+          "stone": "0-2"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "right",
+          "stone": "2-2"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "left",
+          "stone": "1-0"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "1-1"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "3-1"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "left",
+          "stone": "2-3"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "pass"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "6-2"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "4-6"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "right",
+          "stone": "2-1"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "right",
+          "stone": "1-4"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "pass"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "right",
+          "stone": "4-2"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "left",
+          "stone": "4-4"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "left",
+          "stone": "3-4"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "3-3"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "0-3"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "left",
+          "stone": "6-0"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "left",
+          "stone": "6-6"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "3-6"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "pass"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "pass"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "left",
+          "stone": "5-3"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "2-5"
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "deal": {
+        "eseIchacku59": [
+          "0-2",
+          "1-3",
+          "2-2",
+          "2-4",
+          "2-6",
+          "4-4",
+          "5-6"
+        ],
+        "ћ*d61": [
+          "0-5",
+          "0-6",
+          "1-1",
+          "2-3",
+          "4-6",
+          "5-5",
+          "6-6"
+        ],
+        "PLlayer.2т*T*O9859": [
+          "0-0",
+          "1-2",
+          "1-4",
+          "1-6",
+          "2-5",
+          "3-4",
+          "3-6"
+        ],
+        "P*layer.12334204261": [
+          "0-1",
+          "0-3",
+          "0-4",
+          "1-5",
+          "3-3",
+          "3-5",
+          "4-5"
+        ]
+      },
+      "moves": [
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "start",
+          "stone": "1-2"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "5-1"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "left",
+          "stone": "6-5"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "right",
+          "stone": "2-3"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "1-6"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "right",
+          "stone": "3-3"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "right",
+          "stone": "3-1"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "right",
+          "stone": "1-1"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "4-1"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "5-4"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "pass"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "left",
+          "stone": "5-5"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "2-5"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "right",
+          "stone": "1-0"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "right",
+          "stone": "0-2"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "pass"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "pass"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "pass"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "left",
+          "stone": "6-2"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "left",
+          "stone": "6-6"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "3-6"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "5-3"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "right",
+          "stone": "2-2"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "left",
+          "stone": "0-5"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "0-0"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "3-0"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "right",
+          "stone": "2-4"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "right",
+          "stone": "4-6"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "4-3"
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "deal": {
+        "eseIchacku59": [
+          "0-4",
+          "0-5",
+          "0-6",
+          "1-6",
+          "2-5",
+          "4-4",
+          "4-6"
+        ],
+        "ћ*d61": [
+          "0-2",
+          "1-1",
+          "1-4",
+          "2-4",
+          "3-4",
+          "3-6",
+          "6-6"
+        ],
+        "PLlayer.2т*T*O9859": [
+          "0-1",
+          "1-2",
+          "1-5",
+          "3-3",
+          "3-5",
+          "4-5",
+          "5-6"
+        ],
+        "P*layer.12334204261": [
+          "0-0",
+          "0-3",
+          "1-3",
+          "2-2",
+          "2-3",
+          "2-6",
+          "5-5"
+        ]
+      },
+      "moves": [
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "start",
+          "stone": "3-3"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "0-3"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "left",
+          "stone": "6-0"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "left",
+          "stone": "6-6"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "5-6"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "5-5"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "left",
+          "stone": "2-5"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "right",
+          "stone": "3-6"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "1-2"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "3-1"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "right",
+          "stone": "6-1"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "right",
+          "stone": "1-1"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "5-3"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "pass"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "left",
+          "stone": "0-5"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "left",
+          "stone": "2-0"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "right",
+          "stone": "1-5"
+        },
+        {
+          "player": "P*layer.12334204261",
+          "action": "left",
+          "stone": "2-2"
+        },
+        {
+          "player": "eseIchacku59",
+          "action": "pass"
+        },
+        {
+          "player": "ћ*d61",
+          "action": "left",
+          "stone": "4-2"
+        },
+        {
+          "player": "PLlayer.2т*T*O9859",
+          "action": "left",
+          "stone": "5-4"
+        }
+      ]
+    }
+  ]
+}

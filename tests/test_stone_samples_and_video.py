@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import cv2
 import pytest
+from test_video import fake_frame_conversion  # noqa: F401
 
 from domino_video.recognition_samples import RecognitionSamples
 from domino_video.storage import ExportStorage

@@ -1,15 +1,22 @@
 import hashlib
 from contextlib import closing
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from .pipeline import ObservationPipeline
 from .player_names import PlayerNameResolver
 from .progress import ConsoleProgress
 from .recognition_diagnostics import RecognitionDiagnostics
-from .recognition_plan import recognition_requests
+from .recognition_plan import (
+    OCRFields,
+    recognition_requests,
+    score_transition_windows,
+    score_visible,
+)
 from .recognition_samples import RecognitionSamples
 from .reconstruct import GameReconstructor, ReconstructionError, ScoreRecognitionError
 from .recording_time import RecordingTimeResolver
+from .remaining_evidence import confirm_empty_remaining
+from .round_start import confirm_round_starts, start_requests, start_windows
 from .storage import ExportStorage
 from .validator import GameValidator
 from .video import VideoReader
@@ -78,6 +85,8 @@ class ParseManager:
                     observations = self._observe(path, workers, progress, device, gpu_workers)
                     progress.update(99, "проверка и сохранение")
                     rounds = self._reconstructor.extract(observations)
+                    if any(o.selective for o in observations):
+                        self._read_start_frames(path, rounds, observations, workers)
                     windows = self._reconstructor.recovery_windows(rounds)
                     if windows and hasattr(self._reader, "interval_frames"):
                         progress.message(f"Дополнительное чтение камней: {len(windows)} интервалов")
@@ -109,7 +118,9 @@ class ParseManager:
                     corrections.check_games(hashes[path], len(groups))
                     for game_number, group in enumerate(groups, 1):
                         record = dict(
-                            number=game_number, rounds=group, errors=[],
+                            number=game_number,
+                            rounds=group,
+                            errors=[],
                             reconstruction_diagnostics=[],
                         )
                         report["games"].append(record)
@@ -150,9 +161,12 @@ class ParseManager:
                             if isinstance(error, ReconstructionError):
                                 diagnostic = dict(error.diagnostic, game=game_number)
                                 record["reconstruction_diagnostics"].append(diagnostic)
-                                failure.update({key: diagnostic[key] for key in (
-                                    "code", "round", "event", "time"
-                                )})
+                                failure.update(
+                                    {
+                                        key: diagnostic[key]
+                                        for key in ("code", "round", "event", "time")
+                                    }
+                                )
                             record["errors"].append(failure)
                             progress.message(f"Партия {game_number}: {error}")
                         entries = self._diagnostics.build(
@@ -292,6 +306,13 @@ class ParseManager:
 
     def _read_fields(self, path, rounds, observations, workers, progress, device, gpu_workers):
         requests = recognition_requests(rounds, observations)
+        for timestamp in start_requests(rounds, observations):
+            requests[timestamp] = replace(requests.get(timestamp, OCRFields()), counts=True)
+        score_times = self._score_transition_frames(path, rounds, observations, workers, progress)
+        # Keep each transition's candidates even if a later empty-looking UI
+        # screen would displace them from the ordinary last-three budget.
+        for timestamp in score_times:
+            requests[timestamp] = replace(requests.get(timestamp, OCRFields()), scores=True)
         if not requests:
             return
         progress.message(f"Адресное чтение текста: {len(requests)} кадров")
@@ -319,12 +340,64 @@ class ParseManager:
                 original.ocr_attempts = obs.ocr_attempts
                 original.names, original.scores, original.limit = obs.names, obs.scores, obs.limit
                 original.counts = obs.counts
+                original.reveal_points = obs.reveal_points
+                original.reveal_valid = obs.reveal_valid
         for rnd in rounds:
             rnd["counters"] = [
                 dict(time=o.time, counts=o.counts)
                 for o in observations
                 if rnd["start"] <= o.time < (rnd["end"] or float("inf")) and o.counts is not None
             ]
+        confirm_empty_remaining(rounds, observations)
+        confirm_round_starts(rounds, observations)
+
+    def _read_start_frames(self, path, rounds, observations, workers):
+        if not rounds or not hasattr(self._reader, "interval_frames"):
+            return
+
+        def frames():
+            last = float("-inf")
+            with closing(self._reader.interval_frames(path, start_windows(rounds))) as source:
+                for timestamp, image in source:
+                    if timestamp - last >= 0.09:
+                        last = timestamp
+                        yield timestamp, image
+
+        pipeline = ObservationPipeline(workers, recognizer=self._recognizer, motion=True)
+        by_time = {o.time: o for o in observations}
+        with closing(pipeline.observe(frames())) as rows:
+            for obs in rows:
+                if not obs.board and len(set(obs.hands[0])) == 7:
+                    by_time.setdefault(obs.time, obs)
+        observations[:] = sorted(by_time.values(), key=lambda o: o.time)
+
+    def _score_transition_frames(self, path, rounds, observations, workers, progress):
+        windows = score_transition_windows(rounds, observations)
+        if not windows or not hasattr(self._reader, "interval_frames"):
+            return []
+        progress.message(f"Поиск итогового табло: {len(windows)} интервалов")
+        pipeline = ObservationPipeline(
+            workers, recognizer=self._recognizer, fields={}, device="cpu"
+        )
+        candidates = [[] for _ in windows]
+        with closing(pipeline.observe(self._reader.interval_frames(path, windows))) as rows:
+            for obs in rows:
+                if not score_visible(obs):
+                    continue
+                for interval, selected in zip(windows, candidates):
+                    if interval[0] < obs.time < interval[1]:
+                        selected.append(obs)
+                        del selected[:-3]
+        by_time = {o.time: o for o in observations}
+        selected_times = set()
+        for selected in candidates:
+            for obs in selected:
+                selected_times.add(obs.time)
+                if obs.time not in by_time:
+                    obs.dense = True
+                    by_time[obs.time] = obs
+        observations[:] = sorted(by_time.values(), key=lambda o: o.time)
+        return sorted(selected_times)
 
     def _groups(self, rounds, observations, limit):
         groups = []
@@ -357,7 +430,9 @@ class ParseManager:
             if last.limit != limit:
                 raise ReconstructionError(
                     "Лимит табло расходится с параметром запуска",
-                    code="score_limit_conflict", round_number=i + 1, time=last.time,
+                    code="score_limit_conflict",
+                    round_number=i + 1,
+                    time=last.time,
                     details=dict(expected=limit, observed=last.limit),
                 )
             team_names = [t["name"] for t in game["teams"]]
@@ -365,7 +440,9 @@ class ParseManager:
             if expected != last.scores:
                 raise ReconstructionError(
                     f"Кон {i + 1}: на табло {last.scores}, по правилам {expected}",
-                    code="score_conflict", round_number=i + 1, time=last.time,
+                    code="score_conflict",
+                    round_number=i + 1,
+                    time=last.time,
                     details=dict(expected=expected, observed=last.scores),
                 )
 

@@ -72,7 +72,7 @@ class GameValidator:
                 raise InvalidGame("Партнёры должны сидеть напротив")
         order = [seats[i] for i in range(1, 5)]
         scores, fences, eggs = dict.fromkeys(names, 0), dict.fromkeys(names, 0), 0
-        previous_finisher, game_result = None, None
+        previous_finisher, previous_reason, game_result = None, None, None
         output = []
         for number, rnd in enumerate(rounds, 1):
             if game_result:
@@ -81,10 +81,9 @@ class GameValidator:
                 raise InvalidGame("Нарушена нумерация конов")
             hands = deepcopy(rnd["deal"])
             self._check_deal(hands, order)
+            double_start = not any(scores.values()) and previous_reason != "emptyHand"
             starter = (
-                next(p for p in order if "1-1" in hands[p])
-                if not any(scores.values())
-                else previous_finisher
+                next(p for p in order if "1-1" in hands[p]) if double_start else previous_finisher
             )
             turn, ends, last_non_double, finished = order.index(starter), None, None, None
             for index, move in enumerate(rnd["moves"], 1):
@@ -96,7 +95,7 @@ class GameValidator:
                     raise InvalidGame(f"{where}: нарушена очередь, ожидается {order[turn]}")
                 action = move["action"]
                 if index == 1:
-                    if action != "start" or (not any(scores.values()) and move["stone"] != "1-1"):
+                    if action != "start" or (double_start and move["stone"] != "1-1"):
                         raise InvalidGame(f"{where}: неверный заход")
                 elif action == "start":
                     raise InvalidGame(f"{where}: повторный заход")
@@ -140,6 +139,7 @@ class GameValidator:
             scores = result["total_score"]
             fences = {team: result.get("fence", {}).get(team, 0) for team in scores}
             eggs, previous_finisher = result.get("eggs", 0), finisher
+            previous_reason = result["reason"]
             output.append(
                 dict(
                     number=number,

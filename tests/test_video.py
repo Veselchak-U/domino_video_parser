@@ -5,6 +5,24 @@ import pytest
 from domino_video.video import VideoReader
 
 
+@pytest.fixture(autouse=True)
+def fake_frame_conversion(monkeypatch):
+    """Keep decoder doubles separate from the real PyAV pixel conversion."""
+    import av
+    from av.video.reformatter import VideoReformatter
+
+    class Converter:
+        def __init__(self):
+            self.real = VideoReformatter()
+
+        def reformat(self, frame, **kwargs):
+            return (
+                self.real.reformat(frame, **kwargs) if isinstance(frame, av.VideoFrame) else frame
+            )
+
+    monkeypatch.setattr("domino_video.video.VideoReformatter", Converter, raising=False)
+
+
 class Container:
     def __init__(self, duration=None, container_duration=None, times=(10, 11, 12)):
         self.streams = SimpleNamespace(
@@ -223,6 +241,28 @@ def test_real_threaded_decoder_matches_single_thread_pts_and_pixels(tmp_path):
     dense = dict(reader.interval_frames(path, [(0, 0.2), (1.5, 1.7)]))
     assert list(dense) == [0, 0.1, 0.2, 1.5, 1.6, 1.7]
     assert all(np.array_equal(baseline[t], image) for t, image in dense.items())
+
+
+def test_image_reuses_converter_without_changing_pixels(monkeypatch):
+    import av
+    import numpy as np
+    from av.video.reformatter import VideoReformatter
+
+    created = []
+
+    def converter():
+        instance = VideoReformatter()
+        created.append(instance)
+        return instance
+
+    monkeypatch.setattr("domino_video.video.VideoReformatter", converter, raising=False)
+    reader = VideoReader()
+    for width, height, value in [(96, 64, 50), (128, 96, 180), (96, 64, 20)]:
+        source = np.full((height, width, 3), value, dtype=np.uint8)
+        frame = av.VideoFrame.from_ndarray(source, format="bgr24").reformat(format="yuv420p")
+        expected = frame.to_ndarray(format="bgr24")
+        assert np.array_equal(reader._image(frame), expected)
+    assert len(created) == 1
 
 
 @pytest.mark.parametrize("gpu_seconds,use_gpu", [(0.05, True), (0.2, False), (0.3, False)])

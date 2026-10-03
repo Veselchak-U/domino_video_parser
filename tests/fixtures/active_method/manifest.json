@@ -1,0 +1,24 @@
+[
+  {
+    "name": "19-44",
+    "source": "Record_2026-10-01-19-44-20_ef23194d097aa6e1b107d0f095c4226c.mp4",
+    "time": 27.804544444444446,
+    "stone": "1-1",
+    "actual_seat": 2,
+    "first_round_end": 98.92014444444445,
+    "note": "Method label independently verified from saved actual PNG; observations retain cycle5 active/counters, only source label is new.",
+    "source_sha256": "e1fa0386a0ffdf3dd7d7705bbcf52069ec8239dcdea450ddb6445471955392a0",
+    "png_sha256": "87214347ca377526e5ff40634bf5906cc31554f5992ccf9f88c65af50afde9d8"
+  },
+  {
+    "name": "15-01",
+    "source": "Record_2026-10-02-15-01-48_ef23194d097aa6e1b107d0f095c4226c.mp4",
+    "time": 27.787755555555556,
+    "stone": "0-1",
+    "actual_seat": 3,
+    "first_round_end": 124.70561111111111,
+    "note": "Method label independently verified from saved actual PNG; observations retain cycle5 active/counters, only source label is new.",
+    "source_sha256": "0ac81b912104ebd44776b0a644e0b0fbf33e06c83fcf522377bc2da6830ff765",
+    "png_sha256": "22b69a1c03eaa4a1bda2231d9ba283d01f3872305eeb426fc7b753d3c7e60f6f"
+  }
+]

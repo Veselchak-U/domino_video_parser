@@ -4,6 +4,8 @@ import math
 from collections import Counter
 from copy import deepcopy
 
+from .indicator_evidence import mark_weak_indicator
+from .reconstruction_counters import ahead_selection_counts, count_readings
 from .reconstruction_diagnostics import event_trace, failure_message, reject
 from .stone_recovery import StoneRecovery
 from .validator import GameValidator, InvalidGame
@@ -39,7 +41,8 @@ class ScoreRecognitionError(ReconstructionError):
     def __init__(self, round_number):
         super().__init__(
             f"Кон {round_number}: не прочитан итоговый счёт",
-            code="score_missing", round_number=round_number,
+            code="score_missing",
+            round_number=round_number,
         )
         self.round_number = round_number
 
@@ -58,6 +61,7 @@ class GameReconstructor:
         seen_at = {}
         hand_history = []
         saw_empty = False
+        indicator_rows = []
         for obs in observations:
             if not obs.supported:
                 continue
@@ -72,6 +76,7 @@ class GameReconstructor:
                         current["end"] = obs.time
                     reveal_rows.append(obs)
                 last_reveal = True
+                indicator_rows = []
                 continue
             if last_reveal:
                 if current is not None:
@@ -85,6 +90,7 @@ class GameReconstructor:
                 first_seen = {}
                 placed_at = {}
                 seen_at = {}
+            indicator_rows.append(obs)
             if not obs.board:
                 saw_empty = True
                 continue
@@ -98,6 +104,10 @@ class GameReconstructor:
                 saw_empty = False
                 hands = Counter(h for t, h in hand_history if obs.time - 12 < t <= obs.time)
                 current["initial_hand"] = list(hands.most_common(1)[0][0]) if hands else None
+                mark_weak_indicator(
+                    current, [o for o in indicator_rows if o.time >= obs.time - 3.5]
+                )
+            mark_weak_indicator(current, [obs])
             if obs.counts is not None:
                 current.setdefault("counters", []).append({"time": obs.time, "counts": obs.counts})
             by_stone = {s.stone: s for s in obs.board}
@@ -138,9 +148,17 @@ class GameReconstructor:
                 seat = seats[-1] if seats else (obs.active if obs.active is not None else None)
                 action = self._side(current["events"], tile, by_stone)
                 choices = sorted({p for t, p in history if when - 3.5 <= t <= when - 0.3}) or [seat]
+                eligible = [
+                    o for o in indicator_rows if o.active is not None and o.time <= when - 0.3
+                ]
+                mark_weak_indicator(
+                    current,
+                    [o for o in eligible if o.time >= when - 3.5] + eligible[-1:],
+                )
                 current["events"].append(
                     dict(
                         time=when,
+                        confirmed_at=obs.time,
                         seat=seat,
                         seats=choices,
                         action=action,
@@ -163,7 +181,27 @@ class GameReconstructor:
             if reveal_rows:
                 self._finish(current, reveal_rows, history)
             rounds.append(current)
+        for rnd in rounds:
+            self._chronological_sides(rnd, observations)
         return StoneRecovery().augment(rounds, observations)
+
+    def _chronological_sides(self, rnd, observations):
+        # Confirmation order can differ from placement order after an occlusion.
+        # Derive sides again from chronological events and their actual layouts.
+        prior = []
+        rows = {o.time: o for o in observations}
+        for event in rnd["events"]:
+            event["action"] = None
+            obs = rows.get(event["confirmed_at"])
+            if obs is not None:
+                visible = {tile.stone: tile for tile in obs.board}
+                tile = visible.get(event["stone"])
+                if tile is not None:
+                    side = self._side(prior, tile, visible)
+                    event["action"] = side
+                    if side == "start":
+                        event["orientation"] = "-".join(map(str, tile.values))
+            prior.append(event)
 
     def recovery_windows(self, rounds):
         return StoneRecovery().windows(rounds)
@@ -235,14 +273,19 @@ class GameReconstructor:
         for number, raw in enumerate(rounds, 1):
             if not raw["complete"] or raw["remaining"] is None:
                 raise ReconstructionError(
-                    f"Кон {number}: неполная запись", code="incomplete_round",
+                    f"Кон {number}: неполная запись",
+                    code="incomplete_round",
                     round_number=number,
-                    details=dict(complete=raw["complete"], start=raw.get("start"), end=raw.get("end")),
+                    details=dict(
+                        complete=raw["complete"], start=raw.get("start"), end=raw.get("end")
+                    ),
                 )
             if not raw.get("start_observed", True):
                 raise ReconstructionError(
-                    f"Кон {number}: не записано начало розыгрыша", code="missing_start",
-                    round_number=number, details=dict(first_observed=raw.get("start")),
+                    f"Кон {number}: не записано начало розыгрыша",
+                    code="missing_start",
+                    round_number=number,
+                    details=dict(first_observed=raw.get("start")),
                 )
             events = deepcopy(raw["events"])
             used = [event["stone"] for event in events] + [
@@ -252,7 +295,8 @@ class GameReconstructor:
             missing = {f"{a}-{b}" for a in range(7) for b in range(a, 7)} - set(used)
             if len(used) != len(set(used)):
                 raise ReconstructionError(
-                    f"Кон {number}: повтор камня в наблюдениях", code="duplicate_stones",
+                    f"Кон {number}: повтор камня в наблюдениях",
+                    code="duplicate_stones",
                     round_number=number,
                     details=dict(repeated={s: n for s, n in Counter(used).items() if n > 1}),
                 )
@@ -261,11 +305,17 @@ class GameReconstructor:
                     last = raw.get("last_active")
                     raise ReconstructionError(
                         f"Кон {number}: не подтверждены конечные остатки",
-                        code="unconfirmed_remaining", round_number=number, time=raw.get("end"),
+                        code="unconfirmed_remaining",
+                        round_number=number,
+                        time=raw.get("end"),
                         details=dict(
-                            unconfirmed_seats=[i + 1 for i, ok in enumerate(
-                                raw.get("remaining_confirmed", [False] * 4)) if not ok],
-                            remaining=raw["remaining"], missing=sorted(missing),
+                            unconfirmed_seats=[
+                                i + 1
+                                for i, ok in enumerate(raw.get("remaining_confirmed", [False] * 4))
+                                if not ok
+                            ],
+                            remaining=raw["remaining"],
+                            missing=sorted(missing),
                             accounted_count=len(set(used)),
                             last_active=None if last is None else last + 1,
                         ),
@@ -273,18 +323,23 @@ class GameReconstructor:
                 if not StoneRecovery().exclusion(raw, events, sorted(missing)):
                     raise ReconstructionError(
                         f"Кон {number}: не распознаны камни {sorted(missing)}",
-                        code="missing_stones", round_number=number,
+                        code="missing_stones",
+                        round_number=number,
                         details=dict(
-                            missing=sorted(missing), unresolved=raw.get("unresolved", [])[:8],
+                            missing=sorted(missing),
+                            unresolved=raw.get("unresolved", [])[:8],
                             omitted_unresolved=max(0, len(raw.get("unresolved", [])) - 8),
                         ),
                     )
             if any(e["stone"] is None for e in events) or raw.get("issues"):
                 raise ReconstructionError(
                     f"Кон {number}: противоречивые или неизвестные события",
-                    code="unresolved_events", round_number=number,
-                    details=dict(issues=raw.get("issues", []), unknown_events=[
-                        i + 1 for i, e in enumerate(events) if e["stone"] is None]),
+                    code="unresolved_events",
+                    round_number=number,
+                    details=dict(
+                        issues=raw.get("issues", []),
+                        unknown_events=[i + 1 for i, e in enumerate(events) if e["stone"] is None],
+                    ),
                 )
             for index, event in enumerate(events, 1):
                 for entry in raw.get("stone_recovery", []):
@@ -295,15 +350,22 @@ class GameReconstructor:
             if len(candidates) * len(options) > 128:
                 raise ReconstructionError(
                     f"Кон {number}: слишком много сочетаний реконструкций",
-                    code="reconstruction_combination_limit", round_number=number,
-                    details=dict(prior_candidates=len(candidates), round_options=len(options), limit=128),
+                    code="reconstruction_combination_limit",
+                    round_number=number,
+                    details=dict(
+                        prior_candidates=len(candidates), round_options=len(options), limit=128
+                    ),
                 )
             candidates = [prior + [rnd] for prior in candidates for rnd in options]
             if not candidates or len(candidates) > 128:
-                failure = next((e for e in trace if e["states_before"] and not e["states_after"]), None)
+                failure = next(
+                    (e for e in trace if e["states_before"] and not e["states_after"]), None
+                )
                 raise ReconstructionError(
-                    failure_message(number, failure), code="no_consistent_sequence",
-                    round_number=number, event=failure["event"] if failure else None,
+                    failure_message(number, failure),
+                    code="no_consistent_sequence",
+                    round_number=number,
+                    event=failure["event"] if failure else None,
                     time=failure["time"] if failure else None,
                     details=dict(first_failure=failure, events=trace),
                 )
@@ -321,8 +383,12 @@ class GameReconstructor:
             raise ReconstructionError(
                 errors[0] if not valid and errors else "Несколько допустимых реконструкций",
                 code="all_candidates_invalid" if not valid else "multiple_valid_reconstructions",
-                details=dict(candidate_count=len(candidates), valid_count=len(valid),
-                             validation_errors=errors[:5], omitted_errors=max(0, len(errors) - 5)),
+                details=dict(
+                    candidate_count=len(candidates),
+                    valid_count=len(valid),
+                    validation_errors=errors[:5],
+                    omitted_errors=max(0, len(errors) - 5),
+                ),
             )
         for raw, rnd in zip(rounds, valid[0]["rounds"]):
             for entry in raw.get("stone_recovery", []):
@@ -342,7 +408,7 @@ class GameReconstructor:
         remaining = raw["remaining"]
         initial = raw.get("initial_hand")
         # Each skipped player must lack both endpoints in every still-unplayed stone.
-        states = [([], None, None, [[] for _ in range(4)], [set() for _ in range(4)])]
+        states = [([], None, None, [[] for _ in range(4)], [set() for _ in range(4)], Counter())]
         for index, event in enumerate(events):
             entry = event_trace(event, index, len(states))
             if diagnostics is not None:
@@ -350,21 +416,45 @@ class GameReconstructor:
             expanded = []
             oriented = (event.get("orientation") or event["stone"]) if not index else event["stone"]
             a, b = map(int, oriented.split("-"))
-            for moves, ends, turn, played, forbidden in states:
+            for moves, ends, turn, played, forbidden, selected in states:
                 for seat in event.get("seats", [event["seat"]]):
                     if seat is None or len(played[seat]) + len(remaining[seat]) >= 7:
                         if seat is None:
                             reject(entry, "unknown_player")
                         else:
-                            reject(entry, "hand_capacity_exceeded", seat=seat + 1,
-                                   played=len(played[seat]), remaining=len(remaining[seat]))
+                            reject(
+                                entry,
+                                "hand_capacity_exceeded",
+                                seat=seat + 1,
+                                played=len(played[seat]),
+                                remaining=len(remaining[seat]),
+                            )
+                        continue
+                    conflicts = [
+                        dict(seat=p + 1, selected_player=seat + 1, count=count)
+                        for p, count in selected.items()
+                        if count >= 2 and p != seat
+                    ]
+                    if conflicts:
+                        reject(
+                            entry,
+                            "hand_counter_conflict",
+                            seat=seat + 1,
+                            phase="next_selection",
+                            conflicts=conflicts,
+                        )
                         continue
                     if initial is not None and ((event["stone"] in initial) != (seat == 0)):
                         reject(entry, "initial_hand_conflict", seat=seat + 1, initial_hand=initial)
                         continue
                     if {a, b} & forbidden[seat]:
-                        reject(entry, "prior_pass_conflict", seat=seat + 1,
-                               forbidden=sorted(forbidden[seat]), ends=ends)
+                        reject(
+                            entry,
+                            "prior_pass_conflict",
+                            seat=seat + 1,
+                            forbidden=sorted(forbidden[seat]),
+                            ends=ends,
+                        )
                         continue
                     next_moves = deepcopy(moves)
                     next_forbidden = deepcopy(forbidden)
@@ -377,9 +467,15 @@ class GameReconstructor:
                             else remaining[cursor]
                         )
                         if any(set(map(int, s.split("-"))) & set(ends) for s in hand):
-                            reject(entry, "illegal_pass", seat=cursor + 1, ends=ends,
-                                   blocking_stones=sorted(s for s in hand
-                                       if set(map(int, s.split("-"))) & set(ends)))
+                            reject(
+                                entry,
+                                "illegal_pass",
+                                seat=cursor + 1,
+                                ends=ends,
+                                blocking_stones=sorted(
+                                    s for s in hand if set(map(int, s.split("-"))) & set(ends)
+                                ),
+                            )
                             possible = False
                             break
                         next_forbidden[cursor].update(ends)
@@ -426,18 +522,30 @@ class GameReconstructor:
                                     "left" if left_distance < right_distance else "right"
                                 )
                                 if action != observed_side:
-                                    reject(entry, "geometry_conflict", seat=seat + 1,
-                                           action=action, observed_side=observed_side,
-                                           left_distance=left_distance, right_distance=right_distance,
-                                           tile_size=event.get("tile_size", 100))
+                                    reject(
+                                        entry,
+                                        "geometry_conflict",
+                                        seat=seat + 1,
+                                        action=action,
+                                        observed_side=observed_side,
+                                        left_distance=left_distance,
+                                        right_distance=right_distance,
+                                        tile_size=event.get("tile_size", 100),
+                                    )
                                     continue
                         new_ends = list(ends) if ends else [a, b]
                         move_stone = oriented
                         if action != "start":
                             side = 0 if action == "left" else 1
                             if new_ends[side] not in (a, b):
-                                reject(entry, "endpoint_mismatch", seat=seat + 1,
-                                       action=action, ends=new_ends, oriented_stone=oriented)
+                                reject(
+                                    entry,
+                                    "endpoint_mismatch",
+                                    seat=seat + 1,
+                                    action=action,
+                                    ends=new_ends,
+                                    oriented_stone=oriented,
+                                )
                                 continue
                             joined = new_ends[side]
                             outer = b if joined == a else a
@@ -447,6 +555,7 @@ class GameReconstructor:
                             new_ends[side] = outer
                         new_played = deepcopy(played)
                         new_played[seat].append(event["stone"])
+                        next_selected = Counter()
                         if raw.get("indicator_unreliable") or len(set(event.get("seats", []))) > 1:
                             stop = (
                                 events[index + 1]["time"] if index + 1 < len(events) else raw["end"]
@@ -456,12 +565,16 @@ class GameReconstructor:
                                 for o in raw.get("counters", [])
                                 if event["time"] + 0.3 < o["time"] < stop - 0.3
                             ]
-                            readings = [
-                                Counter(
-                                    o["counts"][p] for o in counters if o["counts"][p] is not None
-                                )
-                                for p in range(4)
-                            ]
+                            readings = count_readings(
+                                counters,
+                                new_played,
+                                events[index + 1] if index + 1 < len(events) else None,
+                            )
+                            next_selected = ahead_selection_counts(
+                                counters,
+                                new_played,
+                                events[index + 1] if index + 1 < len(events) else None,
+                            )
                             if any(
                                 count >= 2 and value != 7 - len(new_played[p])
                                 for p, reading in enumerate(readings)
@@ -469,14 +582,24 @@ class GameReconstructor:
                                 for value, count in reading.items()
                             ):
                                 conflicts = [
-                                    dict(seat=p + 1, expected=7 - len(new_played[p]),
-                                         observed=value, count=count)
-                                    for p, reading in enumerate(readings) if p != 0
+                                    dict(
+                                        seat=p + 1,
+                                        expected=7 - len(new_played[p]),
+                                        observed=value,
+                                        count=count,
+                                    )
+                                    for p, reading in enumerate(readings)
+                                    if p != 0
                                     for value, count in reading.items()
                                     if count >= 2 and value != 7 - len(new_played[p])
                                 ]
-                                reject(entry, "hand_counter_conflict", seat=seat + 1,
-                                       conflicts=conflicts, interval=[event["time"] + 0.3, stop - 0.3])
+                                reject(
+                                    entry,
+                                    "hand_counter_conflict",
+                                    seat=seat + 1,
+                                    conflicts=conflicts,
+                                    interval=[event["time"] + 0.3, stop - 0.3],
+                                )
                                 continue
                         expanded.append(
                             (
@@ -486,6 +609,7 @@ class GameReconstructor:
                                 (seat + 1) % 4,
                                 new_played,
                                 next_forbidden,
+                                next_selected,
                             )
                         )
             states = expanded
@@ -493,14 +617,22 @@ class GameReconstructor:
             if len(states) > 4096:
                 raise ReconstructionError(
                     f"Кон {number}: превышен предел неоднозначных событий",
-                    code="search_state_limit", round_number=number,
-                    event=index + 1, time=event["time"],
+                    code="search_state_limit",
+                    round_number=number,
+                    event=index + 1,
+                    time=event["time"],
                     details=dict(count=len(states), limit=4096, events=diagnostics or [entry]),
                 )
         options = []
-        final = dict(event=None, time=None, stone=None, states_before=len(states),
-                     states_after=0, rejections={})
-        for moves, _, _, played, _ in states:
+        final = dict(
+            event=None,
+            time=None,
+            stone=None,
+            states_before=len(states),
+            states_after=0,
+            rejections={},
+        )
+        for moves, _, _, played, _, _ in states:
             hands = {names[i]: sorted(remaining[i] + played[i]) for i in range(4)}
             if all(len(hand) == 7 for hand in hands.values()):
                 options.append(dict(number=number, deal=hands, moves=moves))
