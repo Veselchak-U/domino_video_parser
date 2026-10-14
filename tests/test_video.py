@@ -5,6 +5,36 @@ import pytest
 from domino_video.video import VideoReader
 
 
+@pytest.mark.parametrize(
+    "times,windows,expected",
+    [
+        (
+            (0, 0.04, 0.08, 0.12, 0.16, 0.20, 0.24, 0.28, 0.32),
+            [(0.03, 0.28), (0.15, 0.32)],
+            [0.04, 0.12, 0.20, 0.32],
+        ),
+        ((0, 0.25, 0.5, 0.75), [(0, 0.75)], [0, 0.25, 0.5, 0.75]),
+        ((0.03, 0.06, 0.09), [(0.03, 0.09)], [0.03, 0.09]),
+    ],
+)
+def test_sampled_windows_preserve_source_grid_edges_and_unique_pts(
+    monkeypatch, times, windows, expected
+):
+    container = Container(times=times)
+    seeks = []
+    container.seek = lambda offset, **kwargs: seeks.append(offset)
+    container.decode = lambda **kwargs: (
+        SimpleNamespace(time=t, to_ndarray=lambda format, t=t: t) for t in times
+    )
+    monkeypatch.setattr("domino_video.video.av.open", lambda path: container)
+    reader = VideoReader()
+    # The old native path reads every frame, violating the local 10 fps budget.
+    method = getattr(reader, "sampled_interval_frames", reader.interval_frames)
+    assert [t for t, _ in method("video.mp4", windows)] == expected
+    assert len(seeks) == 1
+    assert container.closed
+
+
 @pytest.fixture(autouse=True)
 def fake_frame_conversion(monkeypatch):
     """Keep decoder doubles separate from the real PyAV pixel conversion."""
@@ -241,6 +271,30 @@ def test_real_threaded_decoder_matches_single_thread_pts_and_pixels(tmp_path):
     dense = dict(reader.interval_frames(path, [(0, 0.2), (1.5, 1.7)]))
     assert list(dense) == [0, 0.1, 0.2, 1.5, 1.6, 1.7]
     assert all(np.array_equal(baseline[t], image) for t, image in dense.items())
+    sampled = dict(reader.sampled_interval_frames(path, [(0.03, 0.37), (0.2, 0.51)]))
+    assert list(sampled) == [0.1, 0.2, 0.3, 0.4, 0.5]
+    assert all(np.array_equal(baseline[t], image) for t, image in sampled.items())
+
+
+@pytest.mark.parametrize("stop", ["close", "error"])
+def test_sampled_window_releases_decoder_on_cancel_and_failure(monkeypatch, stop):
+    container = Container(times=(0, 0.05, 0.1))
+    container.seek = lambda *args, **kwargs: None
+
+    def decode(**kwargs):
+        yield SimpleNamespace(time=0, to_ndarray=lambda format: "first")
+        raise RuntimeError("decode failure")
+
+    container.decode = decode
+    monkeypatch.setattr("domino_video.video.av.open", lambda path: container)
+    frames = VideoReader().sampled_interval_frames("video.mp4", [(0, 0.2)])
+    assert next(frames) == (0, "first")
+    if stop == "close":
+        frames.close()
+    else:
+        with pytest.raises(RuntimeError, match="decode failure"):
+            next(frames)
+    assert container.closed
 
 
 def test_image_reuses_converter_without_changing_pixels(monkeypatch):

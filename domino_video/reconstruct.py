@@ -183,6 +183,13 @@ class GameReconstructor:
             rounds.append(current)
         for rnd in rounds:
             self._chronological_sides(rnd, observations)
+            rnd["observation_times"] = [
+                o.time
+                for o in observations
+                if rnd["start"]
+                <= o.time
+                <= (rnd["end"] if rnd["end"] is not None else float("inf"))
+            ]
         return StoneRecovery().augment(rounds, observations)
 
     def _chronological_sides(self, rnd, observations):
@@ -204,10 +211,48 @@ class GameReconstructor:
             prior.append(event)
 
     def recovery_windows(self, rounds):
-        return StoneRecovery().windows(rounds)
+        return StoneRecovery().windows(
+            [
+                rnd
+                for rnd in rounds
+                if not rnd.get("logically_resolved")
+                or any(event.get("stone") is None for event in rnd["events"])
+                or any(
+                    slot.get("stone") is None
+                    and (slot.get("metadata") or not slot.get("candidates"))
+                    for slot in rnd.get("unresolved", [])
+                )
+            ]
+        )
+
+    def resolve_logically(self, rounds, observations, variant, limit) -> bool:
+        from .logical_recovery import resolve_logically
+
+        return resolve_logically(self, rounds, observations, variant, limit)
 
     def integrate_recovery(self, rounds, observations):
-        StoneRecovery().integrate(rounds, observations)
+        for index, raw in enumerate(rounds):
+            if raw.get("logically_resolved"):
+                continue
+            original_end = raw.get("end")
+            candidate = raw if original_end is not None else deepcopy(raw)
+            upper = original_end
+            if upper is None:
+                upper = max(candidate.get("observation_times", [candidate["start"]]))
+            if index + 1 < len(rounds):
+                upper = min(upper, rounds[index + 1]["start"])
+            candidate["end"] = upper
+            history_start = candidate["start"] - 3.5
+            if index:
+                history_start = max(
+                    history_start, rounds[index - 1].get("end") or candidate["start"]
+                )
+            source_rows = [o for o in observations if history_start <= o.time < upper]
+            StoneRecovery().integrate([candidate], source_rows)
+            candidate["end"] = original_end
+            if candidate is not raw:
+                raw.clear()
+                raw.update(candidate)
 
     def _side(self, events, tile, visible):
         if not events:
@@ -260,7 +305,7 @@ class GameReconstructor:
             (seat for t, seat in reversed(history) if t <= current["end"]), None
         )
 
-    def build(self, rounds, names, variant, limit):
+    def build(self, rounds, names, variant, limit, *, require_finished=True):
         if names is None or len(set(names)) != 4 or not all(names):
             raise NameRecognitionError(
                 "Не удалось прочитать четыре различных имени", code="invalid_player_names"
@@ -270,6 +315,7 @@ class GameReconstructor:
             dict(id="B", name="Team B", players=[dict(name=names[i], seat=i + 1) for i in [1, 3]]),
         ]
         candidates = [[]]
+        weak_fragments = []
         for number, raw in enumerate(rounds, 1):
             if not raw["complete"] or raw["remaining"] is None:
                 raise ReconstructionError(
@@ -341,6 +387,31 @@ class GameReconstructor:
                         unknown_events=[i + 1 for i, e in enumerate(events) if e["stone"] is None],
                     ),
                 )
+            uncovered = [
+                slot
+                for slot in raw.get("unresolved", [])
+                if slot.get("stone") is None
+                and (slot.get("metadata") is not None or not slot.get("candidates"))
+            ]
+            weak = [
+                slot
+                for slot in uncovered
+                if slot.get("reason") == "occluded"
+                and slot.get("metadata") is None
+                and not any(
+                    slot.get(key)
+                    for key in (
+                        "reading_times",
+                        "recovery",
+                        "logical_terminal_evidence",
+                        "hand_difference",
+                        "incoming",
+                        "placement_links",
+                    )
+                )
+            ]
+            weak_fragments.append(weak)
+            uncovered = [slot for slot in uncovered if slot not in weak]
             for index, event in enumerate(events, 1):
                 for entry in raw.get("stone_recovery", []):
                     if entry["stone"] == event["stone"]:
@@ -369,13 +440,27 @@ class GameReconstructor:
                     time=failure["time"] if failure else None,
                     details=dict(first_failure=failure, events=trace),
                 )
+            if uncovered:
+                raise ReconstructionError(
+                    f"Кон {number}: не разрешены независимые места ходов",
+                    code="unresolved_events",
+                    round_number=number,
+                    details=dict(unresolved=uncovered, events=trace),
+                )
         valid = []
         errors = []
         validator = GameValidator()
         for candidate in candidates:
             try:
-                game = validator.calculate(teams, candidate, variant, limit)
-                validator.validate(game)
+                game = validator.calculate(
+                    teams, candidate, variant, limit, require_finished=require_finished
+                )
+                if require_finished:
+                    validator.validate(game)
+                elif any(weak_fragments):
+                    # A complete legal game is the negative proof that a weak
+                    # fragment cannot represent another mandatory placement.
+                    validator.validate(game)
                 valid.append(game)
             except InvalidGame as error:
                 errors.append(str(error))
@@ -391,6 +476,30 @@ class GameReconstructor:
                 ),
             )
         for raw, rnd in zip(rounds, valid[0]["rounds"]):
+            self._check_supplied_passes(raw, rnd["moves"], names)
+            confirmed = []
+            for move in rnd["moves"]:
+                if move["action"] == "pass":
+                    continue
+                stone = "-".join(sorted(move["stone"].split("-")))
+                event = next((e for e in raw["events"] if e.get("stone") == stone), None)
+                if event is None:
+                    proof = next(e for e in raw.get("stone_recovery", []) if e["stone"] == stone)
+                    event = dict(
+                        stone=stone,
+                        time=proof["interval"][0],
+                        interval=list(proof["interval"]),
+                        time_is_anchor=True,
+                        recovery=proof,
+                    )
+                event.update(
+                    seat=names.index(move["player"]),
+                    seats=[names.index(move["player"])],
+                    action=move["action"],
+                    orientation=move["stone"],
+                )
+                confirmed.append(event)
+            raw["events"] = confirmed
             for entry in raw.get("stone_recovery", []):
                 entry["status"] = "rules_validated"
                 matching = [
@@ -402,7 +511,53 @@ class GameReconstructor:
                 ]
                 if matching:
                     entry["seat"] = names.index(matching[0]["player"]) + 1
+        for raw, calculated, weak in zip(rounds, valid[0]["rounds"], weak_fragments):
+            for slot in weak:
+                raw.setdefault("ignored_fragments", []).append(
+                    dict(
+                        method="complete_journal_fragment",
+                        interval=list(slot["interval"]),
+                        region=slot.get("region"),
+                        evidence=dict(
+                            accounted=sorted(
+                                stone for hand in calculated["deal"].values() for stone in hand
+                            ),
+                            unique_journal=True,
+                            outcome=deepcopy(calculated["result"]),
+                        ),
+                    )
+                )
+                raw["unresolved"].remove(slot)
         return valid[0]
+
+    @staticmethod
+    def _check_supplied_passes(raw, moves, names):
+        if not raw.get("supplied_passes"):
+            return
+        placements = raw["events"]
+        by_id = {event.get("event_id"): index for index, event in enumerate(placements)}
+        passes = {}
+        index = -1
+        for move in moves:
+            if move["action"] == "pass":
+                passes.setdefault(index, []).append(names.index(move["player"]))
+            else:
+                index += 1
+        requested = {}
+        for marker in raw["supplied_passes"]:
+            before = marker["before_event_id"]
+            after = marker["after_event_id"]
+            left = by_id.get(before) if before is not None else -1
+            right = by_id.get(after) if after is not None else len(placements)
+            if left is None or right is None or right != left + 1:
+                raise ReconstructionError(
+                    "Неизвестные границы ручного паса", code="supplied_pass_conflict"
+                )
+            requested.setdefault(left, []).append(marker["seat"])
+        if any(passes.get(index, []) != seats for index, seats in requested.items()):
+            raise ReconstructionError(
+                "Ручной пас не соответствует очереди и рукам", code="supplied_pass_conflict"
+            )
 
     def _round_options(self, raw, events, names, number, diagnostics=None):
         remaining = raw["remaining"]
@@ -414,6 +569,12 @@ class GameReconstructor:
             simultaneous = bool(index and abs(event["time"] - events[index - 1]["time"]) < 0.01)
             if diagnostics is not None:
                 diagnostics.append(entry)
+            if event.get("supplied") and (
+                (index == 0 and event.get("action") not in (None, "start"))
+                or (index > 0 and event.get("action") == "start")
+            ):
+                reject(entry, "supplied_action_conflict", action=event.get("action"))
+                break
             expanded = []
             oriented = (event.get("orientation") or event["stone"]) if not index else event["stone"]
             a, b = map(int, oriented.split("-"))
@@ -581,11 +742,14 @@ class GameReconstructor:
                             move_stone = (
                                 f"{outer}-{joined}" if action == "left" else f"{joined}-{outer}"
                             )
+                            if event.get("supplied") and event.get("orientation") != move_stone:
+                                reject(entry, "supplied_orientation_conflict", action=action)
+                                continue
                             new_ends[side] = outer
                         new_played = deepcopy(played)
                         new_played[seat].append(event["stone"])
                         next_selected = Counter()
-                        if raw.get("indicator_unreliable") or len(set(event.get("seats", []))) > 1:
+                        if raw.get("counters"):
                             stop = (
                                 events[index + 1]["time"] if index + 1 < len(events) else raw["end"]
                             )

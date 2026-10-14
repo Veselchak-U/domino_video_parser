@@ -12,6 +12,8 @@ REASONS = {
     "endpoint_mismatch": "камень не подходит к концу",
     "hand_counter_conflict": "конфликт счётчика руки",
     "incomplete_deal": "восстановлена неполная раздача",
+    "supplied_orientation_conflict": "ручная ориентация противоречит цепочке",
+    "supplied_action_conflict": "ручное действие противоречит позиции хода",
 }
 
 

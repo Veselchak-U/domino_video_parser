@@ -5,7 +5,7 @@ from collections import Counter
 from copy import deepcopy
 from itertools import groupby
 
-from .anchor_geometry import repeated_identity, static_slot_bridge
+from .anchor_geometry import anchor_matches, repeated_identity, static_slot_bridge
 from .indicator_evidence import mark_weak_indicator, preserve_player_candidates
 from .occluded_placement import occluded_placements
 from .placement_geometry import attach_placement_links
@@ -437,34 +437,96 @@ class StoneRecovery:
             rnd["unresolved"][-1]["tile_size"] = max(tile.box[2:])
 
     def windows(self, rounds):
-        windows = []
+        result = []
         for rnd in rounds:
-            if not rnd.get("complete"):
+            lower = rnd["start"]
+            times = sorted(t for t in rnd.get("observation_times", []) if t >= lower)
+            upper = rnd.get("end")
+            if upper is None:
+                upper = max(times, default=lower)
+            if upper <= lower:
                 continue
+            times = [t for t in times if t <= upper]
+            anchors = sorted(
+                set(
+                    [lower, upper]
+                    + times
+                    + [
+                        event.get("confirmed_at", event.get("time"))
+                        for event in rnd["events"]
+                        if event.get("confirmed_at", event.get("time")) is not None
+                        and lower <= event.get("confirmed_at", event.get("time")) <= upper
+                    ]
+                )
+            )
+
+            def enclosing(start, stop):
+                before = max((t for t in anchors if t < start), default=lower)
+                # Keep the incoming track from the original reading of the
+                # preceding confirmed tile, not only its later stable sample.
+                preceding = [
+                    event
+                    for event in rnd["events"]
+                    if event.get("time") is not None and event["time"] <= before
+                ]
+                if preceding:
+                    event = max(preceding, key=lambda item: item["time"])
+                    before = min(before, event.get("early_reading_interval", [event["time"]])[0])
+                after = min((t for t in anchors if t > stop), default=upper)
+                return before, after
+
+            windows = []
             windows.extend((start, stop) for start, stop, _ in self._early_groups(rnd))
             windows.extend(tuple(window) for window in rnd.get("transition_windows", []))
-            if rnd.get("remaining") is not None:
+            for index, event in enumerate(rnd["events"]):
+                seats = event.get("seats", [event.get("seat")])
+                if (
+                    event.get("time") is not None
+                    and ("seat" in event or "seats" in event)
+                    and event.get("stone") is not None
+                    and (
+                        len(set(seats)) != 1
+                        or seats == [None]
+                        or (index > 0 and event.get("action") is None)
+                    )
+                ):
+                    start, stop = event.get("interval", [event["time"], event["time"]])
+                    early = event.get("early_reading_interval")
+                    if early:
+                        start, stop = min(start, early[0]), max(stop, early[1])
+                    windows.append(enclosing(start, stop))
+            if rnd.get("complete") and rnd.get("remaining") is not None:
                 used = {e["stone"] for e in rnd["events"] if e["stone"] is not None}
                 used.update(s for hand in rnd["remaining"] for s in hand)
                 if len(used) < 28:
-                    # Several final placements can precede the clearing. Include
-                    # their incoming flights and the indicator before each one.
+                    # The last confirmed chain state bounds the whole unknown
+                    # final gap, even when it lasts longer than one second.
                     previous = max(
-                        (e["time"] for e in rnd["events"] if e.get("time") is not None),
-                        default=rnd["end"] - 0.5,
+                        (
+                            e.get("confirmed_at", e.get("time"))
+                            for e in rnd["events"]
+                            if e.get("confirmed_at", e.get("time")) is not None
+                        ),
+                        default=lower,
                     )
-                    windows.append((max(rnd["start"], previous - 0.5), rnd["end"]))
+                    windows.append((max(lower, previous), upper))
             for event in rnd.get("unresolved", []):
-                start = max(rnd["start"], event["interval"][0] - 1)
-                stop = min(rnd["end"], event["interval"][1] + 0.5)
-                windows.append((start, stop))
-        merged = []
-        for start, stop in sorted(windows):
-            if merged and start <= merged[-1][1]:
-                merged[-1] = (merged[-1][0], max(stop, merged[-1][1]))
-            else:
-                merged.append((start, stop))
-        return merged
+                start, stop = event["interval"]
+                early = event.get("early_reading_interval")
+                if early:
+                    start, stop = min(start, early[0]), max(stop, early[1])
+                windows.append(enclosing(start, stop))
+            merged = []
+            for start, stop in sorted(windows):
+                start, stop = max(lower, start), min(upper, stop)
+                if stop <= start:
+                    continue
+                if merged and start <= merged[-1][1]:
+                    merged[-1] = (merged[-1][0], max(stop, merged[-1][1]))
+                else:
+                    merged.append((start, stop))
+            result.extend(merged)
+        return sorted(result)
 
     def _turn_windows(self, rnd, rows):
         if not rnd.get("complete"):
@@ -902,6 +964,111 @@ class StoneRecovery:
                 dict(stone=identities[0], region=slot["region"], times=old[identities[0]] + after)
             )
             rnd["unresolved"].remove(slot)
+
+    def _discard_known_occluded_slots(self, rnd, rows):
+        """Follow a read tile into occlusion, then reconcile its anchored footprint.
+
+        Values come from repeated readable PTS in a continuous physical track.
+        Later unknown contours retain that identity only through two independent
+        visible anchors; deck completeness never supplies a contour's value.
+        """
+        from dataclasses import replace
+
+        if not any(
+            slot.get("reason") == "occluded" and slot.get("metadata") is None
+            for slot in rnd.get("unresolved", [])
+        ):
+            return
+        sources = []
+        for event in rnd["events"]:
+            stone = event.get("stone")
+            if stone is None:
+                continue
+            readings = [
+                (obs, tile)
+                for obs in rows
+                if obs.time >= event["time"]
+                for tile in obs.board + obs.uncertain_board
+                if tile.stone in (None, stone)
+            ]
+            tracks = placement_tracks(readings)
+            for track in tracks:
+                known = [(obs, tile) for obs, tile in track if tile.stone == stone]
+                if len({obs.time for obs, _ in known}) < 2:
+                    continue
+                if track[-1][1].stone == stone and len(known) >= 3:
+                    # Measured source 42ff: two 10 fps samples lack the contour
+                    # during the final bend (99.5048 -> 99.8059, 0.3011 s).
+                    # Bridge only a uniquely approaching, decelerating flight
+                    # into a settled unknown contour, never a second reading.
+                    before, last = known[-2][1], known[-1][1]
+                    approach = tuple(b - a for a, b in zip(before.center, last.center))
+                    candidates = []
+                    for following in tracks:
+                        first_obs, first_tile = following[0]
+                        if not 0 < first_obs.time - track[-1][0].time <= 0.35:
+                            continue
+                        if any(tile.stone is not None for _, tile in following):
+                            continue
+                        step = tuple(b - a for a, b in zip(last.center, first_tile.center))
+                        if (
+                            sum(a * b for a, b in zip(approach, step)) <= 0
+                            or math.hypot(*step) > math.hypot(*approach)
+                            or math.dist(last.center, first_tile.center) > max(last.box[2:]) * 2
+                        ):
+                            continue
+                        candidates.append(following)
+                    if len(candidates) == 1:
+                        track = track + candidates[0]
+                tail = track[-3:]
+                if len(tail) < 3 or any(
+                    math.dist(a[1].center, b[1].center) >= 4 for a, b in zip(tail, tail[1:])
+                ):
+                    continue
+                for obs, tile in track:
+                    if obs.time <= known[-1][0].time or tile.stone is not None:
+                        continue
+                    anchors = self._anchors(obs, tile)
+                    if len(anchors) != 2 or any(anchor.stone is None for anchor in anchors):
+                        continue
+                    resolved = replace(tile, values=tuple(map(int, stone.split("-"))))
+                    sources.append((obs.time, stone, obs.board + [resolved], anchors, resolved))
+        for slot in list(rnd.get("unresolved", [])):
+            if slot.get("reason") != "occluded" or slot.get("metadata") is not None:
+                continue
+            matches = {}
+            for obs in rows:
+                if not slot["interval"][0] <= obs.time <= slot["interval"][1] + 0.5:
+                    continue
+                for tile in obs.uncertain_board:
+                    if not self._fits_slot(slot, tile, obs):
+                        continue
+                    anchors = self._anchors(obs, tile)
+                    if len(anchors) != 2:
+                        continue
+                    for source_time, stone, board, _, _ in sources:
+                        if not any(
+                            event.get("stone") == stone and event["time"] <= slot["interval"][0]
+                            for event in rnd["events"]
+                        ):
+                            continue
+                        if slot.get("candidates") and stone not in slot["candidates"]:
+                            continue
+                        proofs = anchor_matches(tile, anchors, obs.board, board)
+                        if any(proof["stone"] == stone for proof in proofs):
+                            matches.setdefault(stone, set()).add(obs.time)
+            confirmed = [(stone, times) for stone, times in matches.items() if len(times) >= 3]
+            if len(confirmed) == 1:
+                stone, times = confirmed[0]
+                rnd.setdefault("ignored_fragments", []).append(
+                    dict(
+                        stone=stone,
+                        region=slot["region"],
+                        times=sorted(times),
+                        method="known_occluded_identity",
+                    )
+                )
+                rnd["unresolved"].remove(slot)
 
     def _alias_elsewhere(self, rows, start, obs, tile):
         """Use repeated local straight-chain anchors to reject a borrowed name."""
@@ -1563,6 +1730,7 @@ class StoneRecovery:
             )
             preserve_player_candidates(rnd)
             self._discard_old_fragments(rnd, rows)
+            self._discard_known_occluded_slots(rnd, rows)
             # Resolve readable incoming tracks before terminal fallback. The
             # helper requires a unique geometric proof, including when the
             # unresolved slot was initially classified as occluded.
@@ -1808,7 +1976,8 @@ class StoneRecovery:
         event = slots[0]
         event["stone"] = missing[0]
         if event not in events:
-            events.append(deepcopy(event))
+            event = deepcopy(event)
+            events.append(event)
             events.sort(key=lambda e: e["time"])
         entry = self._entry(
             rnd,

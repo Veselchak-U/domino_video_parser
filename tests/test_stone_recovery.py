@@ -212,7 +212,9 @@ def test_exclusion_fills_an_internal_slot(observations):
     r.build(rounds, names, "withoutEggs", 50)
     for rnd in rounds:
         for entry in rnd["stone_recovery"]:
-            if entry["method"] == "exclusion":
+            if entry["method"] == "exclusion" and not any(
+                event["stone"] == entry["stone"] for event in rnd["events"]
+            ):
                 rnd["events"].append(
                     dict(
                         time=entry["interval"][1],
@@ -278,7 +280,7 @@ def test_unsampled_final_placement_requests_bounded_window(complete, accounted):
         ],
         unresolved=[],
     )
-    expected = [(4, 5)] if complete and not accounted else []
+    expected = [(1, 5)] if complete and not accounted else []
     assert GameReconstructor().recovery_windows([rnd]) == expected
 
 
@@ -442,9 +444,15 @@ def test_two_fps_recording_recovers_unsampled_fish_placement():
     rounds = r.extract(load_recording_rows("tests/fixtures/unsampled_final_observations.json.gz"))
     assert rounds[1]["unresolved"] == []
     assert any(start <= 226.4996 <= stop for start, stop in r.recovery_windows(rounds))
-    r.integrate_recovery(
-        rounds, load_recording_rows("tests/fixtures/occluded_motion_observations.json.gz")
-    )
+    ordinary = load_recording_rows("tests/fixtures/unsampled_final_observations.json.gz")
+    extra = load_recording_rows("tests/fixtures/occluded_motion_observations.json.gz")
+    extra += load_recording_rows("tests/fixtures/logical_occluded_10fps_observations.json.gz")
+    r.integrate_recovery(rounds, sorted(ordinary + extra, key=lambda o: o.time))
+    # The actual 10 fps frames prove a readable 6-6 flight into the hidden
+    # footprint, then the same two-anchor footprint in all three intervals.
+    ignored = rounds[0]["ignored_fragments"]
+    assert len(ignored) == 3 and all(entry["stone"] == "6-6" for entry in ignored)
+    assert all(entry["method"] == "known_occluded_identity" for entry in ignored)
     game = r.build(rounds, ["A", "B", "C", "D"], "withoutEggs", 50)
     GameValidator().validate(game)
     assert game["rounds"][1]["moves"][-1] == dict(player="C", action="right", stone="6-4")

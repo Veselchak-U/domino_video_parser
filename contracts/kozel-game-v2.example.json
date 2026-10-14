@@ -1,0 +1,93 @@
+{
+  "format": "kozel-game-v2",
+  "status": "needs_review",
+  "source": {
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "game_number": 1
+  },
+  "fishVariant": "withEggs",
+  "scoreLimit": 101,
+  "teams": [
+    {
+      "id": "A",
+      "name": "Team A",
+      "players": [
+        {
+          "name": "Юг",
+          "seat": 1
+        },
+        {
+          "name": "Север",
+          "seat": 3
+        }
+      ]
+    },
+    {
+      "id": "B",
+      "name": "Team B",
+      "players": [
+        {
+          "name": "Запад",
+          "seat": 2
+        },
+        {
+          "name": "Восток",
+          "seat": 4
+        }
+      ]
+    }
+  ],
+  "rounds": [
+    {
+      "number": 1,
+      "deal": {
+        "Юг": null,
+        "Запад": null,
+        "Север": null,
+        "Восток": null
+      },
+      "moves": [
+        {
+          "event_id": "event-d87da583cdd273c8bcf3026c",
+          "recognition_status": "unresolved",
+          "player": "Запад",
+          "action": "right",
+          "interval": [
+            2,
+            4
+          ],
+          "reason": "Неоднозначное событие",
+          "candidates": [],
+          "stone": null
+        }
+      ],
+      "origin_events": [
+        {
+          "event_id": "event-d87da583cdd273c8bcf3026c",
+          "recognition_status": "unresolved",
+          "player": "Запад",
+          "action": "right",
+          "interval": [
+            2,
+            4
+          ],
+          "reason": "Неоднозначное событие",
+          "candidates": [],
+          "stone": null
+        }
+      ],
+      "result": null,
+      "evidence": {
+        "score": [
+          2,
+          3
+        ],
+        "initial_hand": [
+          "0-0"
+        ]
+      }
+    }
+  ],
+  "result": null,
+  "diagnostics": []
+}

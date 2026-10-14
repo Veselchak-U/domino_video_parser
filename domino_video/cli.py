@@ -43,7 +43,9 @@ def main(argv=None):
     parser.add_argument(
         "--score-limit", required=True, type=int, choices=[50, 101], help="лимит партии"
     )
-    parser.add_argument("--corrections", type=Path, help="JSON исправлений из отчёта")
+    parser.add_argument(
+        "--corrections", type=Path, help="JSON исправлений sources или заполненный kozel-game-v2"
+    )
     parser.add_argument(
         "--device",
         choices=["auto", "cpu", "gpu"],

@@ -1,7 +1,7 @@
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from itertools import islice
-from math import isfinite
+from math import ceil, floor, isfinite
 from pathlib import Path
 from time import perf_counter
 
@@ -131,6 +131,52 @@ class VideoReader:
     def frame_at(self, path, timestamp):
         with closing(self.selected_frames(path, [timestamp])) as frames:
             return next(frames)[1]
+
+    def sampled_interval_frames(self, path, windows, sample_fps=10):
+        """Sample source-aligned targets, keeping the real first/last window frames.
+
+        Windows belong to one caller-owned round context. Native decoding is
+        retained, but conversion happens only for selected source frames.
+        """
+        if not isfinite(sample_fps) or sample_fps <= 0:
+            raise ValueError("Частота выборки должна быть положительной")
+        merged = []
+        for start, stop in sorted(windows):
+            if not isfinite(start) or not isfinite(stop):
+                raise ValueError("Некорректные границы окна")
+            if stop <= start:
+                continue
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(stop, merged[-1][1]))
+            else:
+                merged.append((start, stop))
+        if not merged:
+            return
+        seen = set()
+        with self._open(path) as container:
+            for start, stop in merged:
+                target = ceil(start * sample_fps - 1e-9)
+                container.seek(int(start * av.time_base), backward=True)
+                first = True
+                last = None
+                for frame in container.decode(video=0):
+                    if frame.time is None:
+                        continue
+                    timestamp = float(frame.time)
+                    if timestamp < start:
+                        continue
+                    if timestamp > stop:
+                        break
+                    last = (timestamp, frame)
+                    if first or timestamp + 1e-9 >= target / sample_fps:
+                        first = False
+                        target = max(target, floor(timestamp * sample_fps + 1e-9) + 1)
+                        if timestamp not in seen:
+                            seen.add(timestamp)
+                            yield timestamp, self._image(frame)
+                if last is not None and last[0] not in seen:
+                    seen.add(last[0])
+                    yield last[0], self._image(last[1])
 
     def selected_frames(self, path, timestamps):
         targets = sorted(set(timestamps))

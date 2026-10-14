@@ -256,7 +256,9 @@ def test_rejects_conflicting_score(tmp_path, observations):
         )
         == 1
     )
-    assert not list((tmp_path / "out").glob("*game*.json"))
+    assert not list((tmp_path / "out").glob("*game-001.json"))
+    partial = list((tmp_path / "out").glob("*game-001-needs-review.json"))
+    assert len(partial) == 1
 
 
 def test_name_correction_restores_export_and_bad_input_does_not_stop_it(

@@ -1,7 +1,10 @@
 import hashlib
+import heapq
 from contextlib import closing
-from dataclasses import asdict, replace
+from dataclasses import asdict, is_dataclass, replace
 
+from .evidence import SourceEvidence
+from .partial_game import build_partial_game, validate_partial_game
 from .pipeline import ObservationPipeline
 from .player_names import PlayerNameResolver
 from .progress import ConsoleProgress
@@ -33,6 +36,7 @@ class ParseManager:
         self._diagnostics = RecognitionDiagnostics()
         self._samples = RecognitionSamples(self._reader, self._storage)
         self._time_resolver = time_resolver or RecordingTimeResolver()
+        self._evidence = None
 
     def run(
         self,
@@ -60,6 +64,8 @@ class ParseManager:
             except OSError as error:
                 hash_errors[path] = str(error)
         try:
+            if hasattr(corrections, "check_settings"):
+                corrections.check_settings(variant, limit)
             corrections.check_sources(set(hashes.values()))
         except ValueError as error:
             print(f"Ошибка исправлений: {error}")
@@ -74,7 +80,9 @@ class ParseManager:
                 errors=[],
             )
             saved_paths = []
-            with progress:
+            with progress, SourceEvidence(hashes.get(path, "")) as evidence:
+                self._evidence = evidence
+                self._score_searched = False
                 progress.start(index, len(paths), path.name)
                 try:
                     recording_time = self._time_resolver.resolve(path)
@@ -87,17 +95,50 @@ class ParseManager:
                     rounds = self._reconstructor.extract(observations)
                     if any(o.selective for o in observations):
                         self._read_start_frames(path, rounds, observations, workers)
+                    for group in self._groups(rounds, observations, limit):
+                        self._reconstructor.resolve_logically(group, observations, variant, limit)
+                    if any(o.selective for o in observations):
+                        self._read_fields(
+                            path, rounds, observations, workers, progress, device, gpu_workers
+                        )
+                    for group in self._groups(rounds, observations, limit):
+                        self._reconstructor.resolve_logically(group, observations, variant, limit)
                     windows = self._reconstructor.recovery_windows(rounds)
-                    if windows and hasattr(self._reader, "interval_frames"):
-                        progress.message(f"Дополнительное чтение камней: {len(windows)} интервалов")
+                    if windows and (
+                        hasattr(self._reader, "sampled_interval_frames")
+                        or hasattr(self._reader, "interval_frames")
+                    ):
+                        progress.message(
+                            f"Дополнительное чтение камней: 10 кадров/сек, {len(windows)} интервалов"
+                        )
                         pipeline = ObservationPipeline(
                             workers, recognizer=self._recognizer, motion=True
                         )
                         with closing(
-                            pipeline.observe(self._reader.interval_frames(path, windows))
+                            pipeline.observe(self._recovery_frames(path, windows))
                         ) as rows:
-                            extra = list(rows)
+                            extra = sorted(
+                                (evidence.merge(obs, "motion") for obs in rows),
+                                key=lambda o: o.time,
+                            )
+                        by_time = {o.time: o for o in observations}
+                        by_time.update({o.time: o for o in extra})
+                        observations[:] = sorted(by_time.values(), key=lambda o: o.time)
                         self._reconstructor.integrate_recovery(rounds, extra)
+                        for rnd in rounds:
+                            if not rnd.get("logically_resolved"):
+                                rnd.setdefault("logical_resolution", []).append(
+                                    dict(
+                                        stage="local-10fps",
+                                        intervals=[
+                                            [start, stop]
+                                            for start, stop in windows
+                                            if start <= (rnd.get("end") or float("inf"))
+                                            and stop >= rnd["start"]
+                                        ],
+                                        reason="Логическая проверка не дала единственный журнал",
+                                    )
+                                )
                     if any(o.selective for o in observations):
                         self._read_fields(
                             path, rounds, observations, workers, progress, device, gpu_workers
@@ -108,6 +149,8 @@ class ParseManager:
                             code="no_supported_game",
                         )
                     groups = self._groups(rounds, observations, limit)
+                    for group in groups:
+                        self._reconstructor.resolve_logically(group, observations, variant, limit)
                     if any(o.selective for o in observations):
                         for n, group in enumerate(groups):
                             group[-1]["names_end"] = (
@@ -126,12 +169,15 @@ class ParseManager:
                         report["games"].append(record)
                         game_error = None
                         resolved = None
+                        names = None
+                        detected_names = None
                         diagnostic_group = group
                         try:
                             changed, teams = corrections.apply(hashes[path], game_number, group)
                             diagnostic_group = changed
                             resolved = PlayerNameResolver().resolve(observations, group)
                             names = resolved.names
+                            detected_names = names
                             if teams:
                                 resolved = None
                                 names = [
@@ -147,6 +193,23 @@ class ParseManager:
                                 game = self._rename_teams(game, teams)
                             self._check_scores(game, group, observations, limit)
                             GameValidator().validate(game)
+                            conflicts = self._evidence_conflicts()
+                            record["evidence_conflicts"] = conflicts
+                            material = [
+                                item
+                                for item in conflicts
+                                if item["field"] == "board"
+                                or item["field"].startswith(("scores", "counts"))
+                                if group[0]["start"]
+                                <= item["time"]
+                                <= (group[-1]["end"] or float("inf")) + 16
+                            ]
+                            if material:
+                                raise ReconstructionError(
+                                    "Противоречивые чтения одного исходного кадра",
+                                    code="observation_conflict",
+                                    details=dict(conflicts=material),
+                                )
                             for rnd in changed:
                                 for entry in rnd.get("stone_recovery", []):
                                     entry["status"] = "validated"
@@ -169,6 +232,58 @@ class ParseManager:
                                 )
                             record["errors"].append(failure)
                             progress.message(f"Партия {game_number}: {error}")
+                        if game_error is not None:
+                            try:
+                                partial = build_partial_game(
+                                    diagnostic_group,
+                                    names if names and len(set(names)) == 4 else detected_names,
+                                    variant,
+                                    limit,
+                                    hashes[path],
+                                    game_number,
+                                    record["reconstruction_diagnostics"],
+                                )
+                                validate_partial_game(partial)
+                                partial_target = (
+                                    output / f"{prefix}-game-{game_number:03d}-needs-review.json"
+                                )
+                                self._storage.write(partial_target, partial, replace=True)
+                                record["partial_output"] = str(partial_target.resolve())
+                                for raw, partial_round in zip(diagnostic_group, partial["rounds"]):
+                                    unknown_ids = [
+                                        move["event_id"]
+                                        for move in partial_round["moves"]
+                                        if move["recognition_status"] == "unresolved"
+                                    ]
+                                    if unknown_ids:
+                                        raw.setdefault("logical_resolution", []).append(
+                                            dict(
+                                                stage="unresolved",
+                                                events=unknown_ids,
+                                                reason=str(game_error),
+                                            )
+                                        )
+                                for rnd in partial["rounds"]:
+                                    for move in rnd["moves"]:
+                                        if move["recognition_status"] == "unresolved":
+                                            progress.message(
+                                                f"Нераспознанный ход: партия {game_number}, "
+                                                f"кон {rnd['number']}, {move['event_id']}, "
+                                                f"интервал {move['interval']}: {move['reason']}; "
+                                                f"JSON: {partial_target}"
+                                            )
+                            except (ValueError, OSError, KeyError, TypeError) as partial_error:
+                                record["errors"].append(
+                                    dict(time=None, message=f"Неполный JSON: {partial_error}")
+                                )
+                                progress.message(
+                                    f"Не удалось сохранить неполный JSON: {partial_error}"
+                                )
+                        record["logical_resolution"] = [
+                            dict(entry, round=number)
+                            for number, rnd in enumerate(diagnostic_group, 1)
+                            for entry in rnd.get("logical_resolution", [])
+                        ]
                         entries = self._diagnostics.build(
                             observations, group, game_number, game_error, resolved
                         )
@@ -225,6 +340,7 @@ class ParseManager:
                             code=error.diagnostic["code"], time=error.diagnostic["time"]
                         )
                     progress.message(f"Ошибка {path.name}: {error}")
+                report["evidence_conflicts"] = self._evidence_conflicts()
                 report["corrections_template"] = {
                     "sources": [
                         {
@@ -278,6 +394,97 @@ class ParseManager:
                     progress.message(f"Сохранено: {target}")
         return int(failures)
 
+    def _evidence_conflicts(self):
+        if self._evidence is None:
+            return []
+
+        def serializable(value):
+            if is_dataclass(value):
+                return asdict(value)
+            if isinstance(value, dict):
+                return {key: serializable(item) for key, item in value.items()}
+            if isinstance(value, (tuple, list)):
+                return [serializable(item) for item in value]
+            return value
+
+        return [serializable(item) for item in self._evidence.conflicts]
+
+    def _cached_frames(self, frames):
+        with closing(frames):
+            for timestamp, image in frames:
+                if self._evidence is not None and hasattr(image, "nbytes"):
+                    self._evidence.cache_image(timestamp, image)
+                yield timestamp, image
+
+    def _selected_frames(self, path, timestamps):
+        times = sorted(set(timestamps))
+        cached = {
+            timestamp: self._evidence.image_at(timestamp)
+            for timestamp in times
+            if self._evidence is not None
+        }
+        missing = [timestamp for timestamp in times if cached.get(timestamp) is None]
+
+        def decoded():
+            if hasattr(self._reader, "selected_frames"):
+                yield from self._reader.selected_frames(path, missing)
+            else:
+                for timestamp in missing:
+                    yield timestamp, self._reader.frame_at(path, timestamp)
+
+        with closing(decoded()) as source:
+            for timestamp in times:
+                if cached.get(timestamp) is not None:
+                    yield timestamp, cached[timestamp]
+                else:
+                    actual, image = next(source)
+                    if actual != timestamp:
+                        raise ValueError("Адресное чтение изменило исходный PTS")
+                    yield actual, image
+
+    def _recovery_frames(self, path, windows):
+        existing = [
+            obs.time
+            for obs in self._evidence.observations
+            if any(start <= obs.time <= stop for start, stop in windows)
+            and not self._evidence.has_analysis(obs.time, "motion")
+            and (
+                hasattr(self._reader, "selected_frames")
+                or hasattr(self._reader, "frame_at")
+                or self._evidence.image_at(obs.time) is not None
+            )
+        ]
+
+        def sampled():
+            if hasattr(self._reader, "sampled_interval_frames"):
+                yield from self._reader.sampled_interval_frames(path, windows, sample_fps=10)
+            else:
+                # Custom readers can retain the native API; sample the iterable
+                # here rather than silently returning to a native motion pass.
+                last = float("-inf")
+                with closing(self._reader.interval_frames(path, windows)) as frames:
+                    for timestamp, image in frames:
+                        if timestamp + 1e-9 >= last + 0.1:
+                            last = timestamp
+                            yield timestamp, image
+
+        selected = self._selected_frames(path, existing)
+        # Every yielded result is ordered by source time, including coarse
+        # observations outside the new regular grid. Images stay bounded.
+        seen = set()
+        with closing(sampled()) as dense, closing(selected) as ordinary:
+            merged = heapq.merge(dense, ordinary, key=lambda item: item[0])
+            for timestamp, image in merged:
+                if timestamp in seen or self._evidence.has_analysis(timestamp, "motion"):
+                    continue
+                seen.add(timestamp)
+                cached = self._evidence.image_at(timestamp)
+                if cached is not None:
+                    image = cached
+                if hasattr(image, "nbytes"):
+                    self._evidence.cache_image(timestamp, image)
+                yield timestamp, image
+
     def _observe(self, path, workers, progress, device="cpu", gpu_workers="auto"):
         timeline = self._reader.timeline(
             path, lambda: progress.update(0, "определение длительности")
@@ -296,8 +503,17 @@ class ParseManager:
             fields={},
         )
         result = []
-        with closing(pipeline.observe(self._reader.frames(path))) as observations:
+        with closing(
+            pipeline.observe(self._cached_frames(self._reader.frames(path)))
+        ) as observations:
             for observation in observations:
+                if self._evidence is not None:
+                    known = [
+                        name
+                        for name in ("names", "counts", "scores", "reveal_points")
+                        if getattr(observation, name) is not None
+                    ]
+                    observation = self._evidence.merge(observation, fields=known)
                 result.append(observation)
                 processed = max(0, min(timeline.duration, observation.time - timeline.start))
                 progress.update(processed / timeline.duration * 100, processed_seconds=processed)
@@ -308,22 +524,30 @@ class ParseManager:
         requests = recognition_requests(rounds, observations)
         for timestamp in start_requests(rounds, observations):
             requests[timestamp] = replace(requests.get(timestamp, OCRFields()), counts=True)
-        score_times = self._score_transition_frames(path, rounds, observations, workers, progress)
+        score_times = []
+        if not getattr(self, "_score_searched", False):
+            score_times = self._score_transition_frames(
+                path, rounds, observations, workers, progress
+            )
+            self._score_searched = True
         # Keep each transition's candidates even if a later empty-looking UI
         # screen would displace them from the ordinary last-three budget.
         for timestamp in score_times:
             requests[timestamp] = replace(requests.get(timestamp, OCRFields()), scores=True)
+        if self._evidence is not None:
+            trimmed = {}
+            for timestamp, fields in requests.items():
+                desired = [name for name, enabled in asdict(fields).items() if enabled]
+                missing = self._evidence.missing_fields(timestamp, desired)
+                if missing:
+                    trimmed[timestamp] = OCRFields(**dict.fromkeys(missing, True))
+            requests = trimmed
         if not requests:
             return
         progress.message(f"Адресное чтение текста: {len(requests)} кадров")
 
         def frames():
-            if hasattr(self._reader, "selected_frames"):
-                with closing(self._reader.selected_frames(path, requests)) as selected:
-                    yield from selected
-                return
-            for timestamp in sorted(requests):
-                yield timestamp, self._reader.frame_at(path, timestamp)
+            yield from self._cached_frames(self._selected_frames(path, requests))
 
         pipeline = ObservationPipeline(
             workers,
@@ -337,11 +561,29 @@ class ParseManager:
         with closing(pipeline.observe(frames())) as rows:
             for obs in rows:
                 original = by_time[obs.time]
-                original.ocr_attempts = obs.ocr_attempts
-                original.names, original.scores, original.limit = obs.names, obs.scores, obs.limit
-                original.counts = obs.counts
-                original.reveal_points = obs.reveal_points
-                original.reveal_valid = obs.reveal_valid
+                if self._evidence is not None:
+                    by_time[obs.time] = self._evidence.merge(
+                        obs,
+                        fields=[
+                            name for name, value in asdict(requests[obs.time]).items() if value
+                        ],
+                    )
+                else:
+                    for attempt in obs.ocr_attempts:
+                        if attempt not in original.ocr_attempts:
+                            original.ocr_attempts.append(attempt)
+                    for name in (
+                        "names",
+                        "scores",
+                        "limit",
+                        "counts",
+                        "reveal_points",
+                        "reveal_valid",
+                    ):
+                        value = getattr(obs, name)
+                        if value is not None:
+                            setattr(original, name, value)
+        observations[:] = sorted(by_time.values(), key=lambda o: o.time)
         for rnd in rounds:
             rnd["counters"] = [
                 dict(time=o.time, counts=o.counts)
@@ -365,9 +607,11 @@ class ParseManager:
 
         pipeline = ObservationPipeline(workers, recognizer=self._recognizer, motion=True)
         by_time = {o.time: o for o in observations}
-        with closing(pipeline.observe(frames())) as rows:
+        with closing(pipeline.observe(self._cached_frames(frames()))) as rows:
             for obs in rows:
                 if not obs.board and len(set(obs.hands[0])) == 7:
+                    if self._evidence is not None:
+                        obs = self._evidence.merge(obs, "motion")
                     by_time.setdefault(obs.time, obs)
         observations[:] = sorted(by_time.values(), key=lambda o: o.time)
 
@@ -395,6 +639,8 @@ class ParseManager:
                 selected_times.add(obs.time)
                 if obs.time not in by_time:
                     obs.dense = True
+                    if self._evidence is not None:
+                        obs = self._evidence.merge(obs)
                     by_time[obs.time] = obs
         observations[:] = sorted(by_time.values(), key=lambda o: o.time)
         return sorted(selected_times)

@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import pytest
 
+from domino_video.partial_game import validate_partial_game
 from domino_video.reconstruct import GameReconstructor, ReconstructionError
 
 
@@ -82,7 +83,25 @@ def test_diagnostics_do_not_change_valid_game(observations, sample_game):
     before = deepcopy(rounds)
     names = next(o.names for o in observations if o.names)
     assert r.build(rounds, names, "withoutEggs", 50) == sample_game
-    assert [rnd["events"] for rnd in rounds] == [rnd["events"] for rnd in before]
+    for original, enriched in zip(before, rounds, strict=True):
+        for field in (
+            "start",
+            "end",
+            "complete",
+            "initial_hand",
+            "remaining",
+            "remaining_confirmed",
+        ):
+            assert original.get(field) == enriched.get(field)
+        by_stone = {event["stone"]: event for event in enriched["events"]}
+        assert len(by_stone) == len(enriched["events"])
+        for event in original["events"]:
+            confirmed = by_stone[event["stone"]]
+            for field in ("time", "confirmed_at", "positions", "tile_size"):
+                assert event.get(field) == confirmed.get(field)
+            assert confirmed["seat"] in event.get("seats", [event["seat"]])
+            assert confirmed["action"] in ("start", "left", "right")
+    assert r.build(deepcopy(rounds), names, "withoutEggs", 50) == sample_game
 
 
 @pytest.mark.parametrize("timestamp", [22.44678888888889, None])
@@ -109,5 +128,11 @@ def test_manager_publishes_structured_failure_without_inventing_time(
     assert game["errors"][0]["code"] == "no_consistent_sequence"
     assert game["reconstruction_diagnostics"][0]["event"] == 3
     assert game["reconstruction_diagnostics"][0]["game"] == 1
-    assert not list(output.glob("*-game-*.json"))
+    documents = [
+        json.loads(path.read_text(encoding="utf-8")) for path in output.glob("*-game-*.json")
+    ]
+    assert not any(document["format"] == "kozel-game-v1" for document in documents)
+    assert len(documents) == 1
+    validate_partial_game(documents[0])
+    assert documents[0]["status"] == "needs_review"
     assert (tmp_path / "2026-09-28-13-58.mp4").exists()

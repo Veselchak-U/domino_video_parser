@@ -38,7 +38,7 @@ class GameValidator:
             raise InvalidGame("Итог партии расходится с правилами")
         return document
 
-    def calculate(self, teams, rounds, variant, limit):
+    def calculate(self, teams, rounds, variant, limit, *, require_finished=True):
         if (
             variant not in ("withEggs", "withoutEggs")
             or type(limit) is not int
@@ -149,7 +149,7 @@ class GameValidator:
                 )
             )
             game_result = self._rules.game_result(scores, limit)
-        if game_result is None:
+        if game_result is None and require_finished:
             raise InvalidGame("Партия не завершена")
         return dict(
             format="kozel-game-v1",

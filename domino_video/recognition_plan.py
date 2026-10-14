@@ -3,6 +3,8 @@
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from .remaining_evidence import terminal_empty_seat
+
 if TYPE_CHECKING:
     from .vision import Observation
 
@@ -60,6 +62,9 @@ def recognition_requests(
             for seat, value in enumerate(rnd.get("remaining_confirmed", []))
             if not value and not (rnd.get("remaining") or [[], [], [], []])[seat]
         ]
+        terminal_seat = terminal_empty_seat(rnd)
+        if terminal_seat is not None:
+            unknown.append(terminal_seat)
         if unknown:
             reveals = [
                 o
@@ -73,6 +78,10 @@ def recognition_requests(
                     for seat in unknown
                 )
             ]
+            if terminal_seat is not None:
+                reveals = list({obs.time: obs for obs in reveals}.values())
+                if len(reveals) < 2:
+                    reveals = []
             for obs in reveals[-4:]:
                 add(obs.time, "reveal_points")
         tables = [o for o in after if o.result_table]

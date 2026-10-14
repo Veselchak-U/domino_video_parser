@@ -6,6 +6,7 @@ import pytest
 
 from domino_video.corrections import Corrections
 from domino_video.manager import ParseManager
+from domino_video.partial_game import validate_partial_game
 from domino_video.video import VideoTimeline
 from domino_video.vision import Observation
 
@@ -188,7 +189,14 @@ def test_unknown_names_do_not_hide_game_errors_or_repair_invalid_corrections(
         )
     code, report, output, _ = run_fixture(tmp_path, observations, corrections=corrections)
     assert code == 1 and report["status"] == "needs_review"
-    assert not list(output.glob("*game*.json"))
+    documents = [
+        json.loads(path.read_text(encoding="utf-8")) for path in output.glob("*game*.json")
+    ]
+    assert not any(document["format"] == "kozel-game-v1" for document in documents)
+    assert len(documents) == 1
+    validate_partial_game(documents[0])
+    assert documents[0]["status"] == "needs_review"
+    assert (tmp_path / "2026-09-28-13-58.mp4").exists()
     errors = report["games"][0]["errors"]
     assert any(
         "табло" in e["message"] if damage == "score" else "различ" in e["message"] for e in errors
